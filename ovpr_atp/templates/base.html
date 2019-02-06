@@ -34,7 +34,28 @@
         <script type="text/javascript">
             var disableAutosave = {% if disable_autosave %}true{% else %}false{% endif %};
 
+            var pageSelectionFlag = localStorage.getItem("pageSelectionFlag");
+            var formattedSelectors = "";
+            var strArr = [];
+
+            if(localStorage.getItem('pageSelectionFlag') === null){
+                localStorage.setItem('pageSelectionFlag','');
+            }
+
+            strArr = localStorage.getItem('pageSelectionFlag').split(',');
+
+            for(i=0; i < strArr.length; i++){
+                if(i==0){
+                    formattedSelectors = strArr[i];
+                }
+                else{
+                    formattedSelectors = formattedSelectors + ", #" + strArr[i];
+                }
+            }
             $(document).ready(function() {
+                if(pageSelectionFlag != ""){
+                    $("#"+formattedSelectors).collapse('show');
+                }
                 if (!disableAutosave) {
                     reloadTimer = setTimeout(autoReload, 600000);
                 }
@@ -47,8 +68,8 @@
                 });
 
                 $.fn.dataTable.defaults.searchHighlight = true;
-                $.fn.dataTable.TableTools.defaults.aButtons = [ 
-                    { 
+                $.fn.dataTable.TableTools.defaults.aButtons = [
+                    {
                         "sExtends": "copy",
                         "sFieldBoundary": '"',
                         "oSelectorOpts": {
@@ -124,6 +145,8 @@
                                                     <li><a href="{% url 'import_eas_data' 'get_fund_sources' %}">Update Funding Sources</a></li>
                                                     <li><a href="{% url 'import_eas_data' 'get_indirect_cost' %}">Update Indirect Cost Schedules</a></li>
                                                     <li><a href="{% url 'import_eas_data' 'get_prime_sponsor' %}">Update Prime Sponsors</a></li>
+                                                    <li><a href="{% url 'import_eas_data' 'get_report_templates' %}">Update Reports</a></li>
+                                                    <li><a href="{% url 'import_eas_data' 'get_category_codes' %}">Update TermsAndConditions</a></li>
                                               </ul>
                                             </li>
                                         {% endif %}

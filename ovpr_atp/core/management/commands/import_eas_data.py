@@ -16,7 +16,10 @@ from datetime import datetime, timedelta
 import ssl
 import xml.etree.ElementTree as ET
 
-from awards.models import PrimeSponsor, AllowedCostSchedule, AwardManager, AwardOrganization, AwardTemplate, CFDANumber, FedNegRate, FundingSource, IndirectCost
+from awards.models import( 
+    PrimeSponsor, AllowedCostSchedule, AwardManager, AwardOrganization, 
+    AwardTemplate, CFDANumber, FedNegRate, FundingSource, IndirectCost, 
+    Reports, TermsAndConditions)
 
 
 class OracleAdapter(HTTPAdapter):
@@ -100,6 +103,8 @@ class Command(BaseCommand):
         'get_fund_sources': FundingSource,
         'get_indirect_cost': IndirectCost,
         'get_prime_sponsor': PrimeSponsor,
+        'get_report_templates': Reports, 
+        'get_category_codes': TermsAndConditions
     }
 
     def _import_eas_field(self, endpoint, model, from_date=None, to_date=None):

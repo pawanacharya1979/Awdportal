@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h2>Failed rules in PTA</h2><button onclick="goBack()" style="margin-left: 910px;">Back</button>
+{% for key, values in missed_values.items %}
+    <h4>PTA Number# {{key}}</h4>
+    {% for val in values %}
+        <span style="margin-left: 35px;">{{val}}</span><br />
+    {% endfor %}
+    </br>
+{% endfor %}
+
+<script>
+function goBack() {
+  window.history.back();
+}
+</script>
+{% endblock %}
+

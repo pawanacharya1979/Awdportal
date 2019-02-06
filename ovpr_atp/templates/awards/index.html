@@ -126,7 +126,11 @@
                                 {% endif %}
                             </td>
                             <td>
+                                {% if entry.0.assigned_to_qa and entry.0.quality_assurance_user %}
+                                Quality Assurance
+                                {% else %}
                                 {{ entry.0.awardsetup.get_waiting_reason }}
+                                {% endif %}
                             </td>
                             <td>
                                 {{ entry.0.awardsetup.date_wait_for_updated | default:"" }}

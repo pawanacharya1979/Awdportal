@@ -42,9 +42,9 @@ from .views import (
     AwardCloseoutView,
     CreateFinalReportView,
     EditFinalReportView,
-    DeleteFinalReportView,
-    ProposalStatisticsReportView,
-    AwardREAssaignmentView)
+    DeleteFinalReportView, ReportsUpdateView, ReportsDeleteView, ReportsCreateView,
+    TCCreateView, TCDeleteView, TCUpdateView,
+    ProposalStatisticsReportView, AwardREAssaignmentView)
 
 urlpatterns = patterns('awards.views',
    url(r'^$', 'home', name='home'),
@@ -124,4 +124,13 @@ urlpatterns = patterns('awards.views',
    url(r'^(?P<award_pk>\d+)/delete-final-report/(?P<final_report_pk>\d+)/$', login_required(DeleteFinalReportView.as_view()), name='delete_final_report'),
 
    url(r'^get-proposal-statistics-report/$', login_required(ProposalStatisticsReportView.as_view()), name='get_proposal_statistics_report'),
+   url(r'^(?P<pta_pk>\d+)/create-reports/$', ReportsCreateView.as_view(), name="reports_create"),
+   url(r'^update-reports/(?P<reports_pk>\d+)/$', ReportsUpdateView.as_view(), name="reports_update"),
+   url(r'^delete-reports/(?P<reports_pk>\d+)/$', ReportsDeleteView.as_view(), name="reports_delete"),
+   url(r'^show-due-dates/(?P<reports_pk>\d+)/$', "show_due_dates", name="show_due_dates"),
+   url(r'^(?P<pta_pk>\d+)/create-tc/$', TCCreateView.as_view(), name="tc_create"),
+   url(r'^update-tc/(?P<tc_pk>\d+)/$', TCUpdateView.as_view(), name="tc_update"),
+   url(r'^delete-tc/(?P<tc_pk>\d+)/$', TCDeleteView.as_view(), name="tc_delete"),
+
+   url(r'^get_codes_for_category/(?P<category_id>\d+)/$', 'get_codes_for_category', name="get_codes_for_category"),
    )
