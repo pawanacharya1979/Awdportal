@@ -207,6 +207,7 @@ THIRD_PARTY_APPS = (
     'crispy_forms',
     'reversion',
     'report_builder',
+    'fm',
 )
 
 # Apps specific for this project go here.

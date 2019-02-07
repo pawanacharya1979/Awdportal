@@ -6,7 +6,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
 from django.db import models
-from django.db.models import Q
+from django.db.models import Q, Count
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from django.contrib.auth.models import User, Group
@@ -524,7 +524,7 @@ class Award(models.Model):
         [],
         ['AwardAcceptance'],
         ['AwardNegotiation'],
-        ['AwardSetup', 'AwardModification'],
+        ['AwardSetup', 'AwardModification', 'QualityAssurance'],
         ['Subaward', 'AwardManagement'],
         ['AwardCloseout'],
         []
@@ -557,6 +557,11 @@ class Award(models.Model):
             'group': 'Award Modification',
             'edit_url': 'edit_award_setup',
             'edit_status': 3},
+        'QualityAssurance': {
+            'user_field': 'quality_assurance_user',
+            'group': 'Quality Assurance',
+            'edit_url': 'edit_award_setup',
+            'edit_status': 3},
         'Subaward': {
             'user_field': 'subaward_user',
             'group': 'Subaward Management',
@@ -586,8 +591,12 @@ class Award(models.Model):
     END_STATUS = 6
     AWARD_SETUP_STATUS = 3
     AWARD_ACCEPTANCE_STATUS = 1
+    VALIDATION_CHOICES = (
+        (True, u'Yes'),
+        (False, u'No')
+    )
 
-    status = models.IntegerField(choices=STATUS_CHOICES, default=0)
+    status = models.IntegerField(choices=STATUS_CHOICES, default=0, db_index=True)
     creation_date = models.DateField(auto_now_add=True)
     extracted_to_eas = models.BooleanField(default=False)
 
@@ -620,6 +629,14 @@ class Award(models.Model):
         verbose_name='Award Modification User',
         limit_choices_to=Q(
             groups__name='Award Modification'))
+    quality_assurance_user = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        related_name='+',
+        verbose_name='Quality Assurance User',
+        limit_choices_to=Q(
+            groups__name='Quality Assurance'))
     subaward_user = models.ForeignKey(
         User,
         null=True,
@@ -651,8 +668,17 @@ class Award(models.Model):
     award_dual_negotiation = models.BooleanField(default=False)
     award_dual_setup = models.BooleanField(default=False)
     award_dual_modification = models.BooleanField(default=False)
-    award_text = models.CharField(max_length=50, blank=True, null=True)
+    assigned_to_qa = models.BooleanField(default=False)
+    qa_complete = models.BooleanField(default=False)
+    validation_rules = models.BooleanField(
+        choices=VALIDATION_CHOICES,
+        default=False,
+        verbose_name='Disable Validation Rules?')
 
+    class Meta:
+        index_together = [
+            ["id", "status"],
+        ]
     # If an award has a proposal, use that to determine its name. Otherwise,
     # use its internal ID
     def __unicode__(self):
@@ -667,9 +693,10 @@ class Award(models.Model):
         assignment_list = []
         assign_filter = cls.objects.filter(
             (Q(Q(award_setup_user=user) & Q(status=2) & Q(award_dual_setup=True)) | Q(Q(award_setup_user=user) & Q(status=3) & Q(award_dual_setup=True))) |
-            (Q(award_setup_user=user) & Q(status=3) & Q(send_to_modification=False)) |
-            (Q(award_modification_user=user) & Q(status=3) & Q(send_to_modification=True)) |
-            (Q(award_modification_user=user) & Q(status=2) & Q(award_dual_modification=True))
+            (Q(award_setup_user=user) & Q(status=3) & Q(assigned_to_qa=False) & Q(send_to_modification=False)) |
+            (Q(award_modification_user=user) & Q(status=3) & Q(assigned_to_qa=False) & Q(send_to_modification=True)) |
+            (Q(award_modification_user=user) & Q(status=2) & Q(award_dual_modification=True)) |
+            (Q(quality_assurance_user=user) & Q(status=3) & Q(assigned_to_qa=True))
         )
         award_ids = []
         temp_ids = []
@@ -727,8 +754,8 @@ class Award(models.Model):
             (Q(award_acceptance_user=user) & Q(status=1)) |
             (Q(Q(award_negotiation_user=user) & Q(status=2)) | Q(Q(award_negotiation_user=user) & Q(status=2) & Q(award_dual_negotiation=True))) |
             (Q(Q(award_setup_user=user) & Q(status=2) & Q(award_dual_setup=True)) | Q(Q(award_setup_user=user) & Q(status=3) & Q(award_dual_setup=True))) |
-            (Q(award_setup_user=user) & Q(status=3) & Q(send_to_modification=False)) |
-            (Q(award_modification_user=user) & Q(status=3) & Q(Q(send_to_modification=True))) |
+            (Q(award_setup_user=user) & Q(status=3) & Q(assigned_to_qa=False) & Q(send_to_modification=False)) |
+            (Q(award_modification_user=user) & Q(status=3) & Q(assigned_to_qa=False) & Q(Q(send_to_modification=True))) |
             (Q(award_modification_user=user) & Q(status=2) & Q(Q(award_dual_modification=True))) |
             (Q(subaward_user=user) & Q(status=4)) |
             (Q(award_management_user=user) & Q(status=4)) |
@@ -744,6 +771,8 @@ class Award(models.Model):
                         section = 'AwardSetup'
                     if section == 'AwardNegotiation' and user_group.name == 'Award Modification':
                         section = 'AwardModification'
+                    if section == 'QualityAssurance' and user_group.name == 'Quality Assurance':
+                        section = 'QualityAssurance'
                     if award.get_user_for_section(section) == user:
                         edit_url = reverse(
                             award.SECTION_FIELD_MAPPING[section]['edit_url'],
@@ -975,9 +1004,17 @@ class Award(models.Model):
 
         return active_users
 
+    def get_user_for_quality_assurance(self):
+        active_users = []
+        for section in ['QualityAssurance']:
+            user = self.get_user_for_section(section)
+            if user:
+                active_users.append(user)
+
+        return active_users
+
     def get_users_for_active_sections(self, section_flag=False):
         """Gets the users assigned to the currently active sections"""
-
         active_users = []
         if self.status == 3 and self.send_to_modification:
             user_section = "AwardModification"
@@ -999,6 +1036,8 @@ class Award(models.Model):
             users = self.get_users_for_dual_active_sections()
         elif self.award_dual_modification and self.status == 2:
             users = self.get_users_for_negotiation_and_moidification_sections()
+        elif self.status == 3 and self.assigned_to_qa:
+            users = self.get_user_for_quality_assurance()
         else:
             users = self.get_users_for_active_sections()
         names = []
@@ -1058,8 +1097,24 @@ class Award(models.Model):
             recipients,
             fail_silently=False)
 
+    def send_email_update_to_qa(self):
+        """
+        Sends an email to the QualityAssurance user to let them know the award is in QualityAssurance
+        """
 
-    def send_email_update(self, modification_flag=False):
+        recipients = [self.get_user_for_section('QualityAssurance').email]
+
+        send_mail(
+            'OVPR ATP Update',
+            '%s has been assigned to you in ATP. Go to %s%s to review it.' %
+            (self,
+             settings.EMAIL_URL_HOSTNAME,
+             self.get_absolute_url()),
+            'reply@email.gwu.edu',
+            recipients,
+            fail_silently=False)
+
+    def send_email_update(self, modification_flag=False, qa_comments=False):
         """Sends an email update to a user when they've been assigned an active section"""
         if self.status == 1:
             origional_text = 'Original Award'
@@ -1086,16 +1141,29 @@ class Award(models.Model):
         if most_recent_proposal:
             pi_name = ' (PI: {0})'.format(most_recent_proposal.principal_investigator)
 
-        send_mail(
-            'OVPR ATP Update',
-            '%s%s has been assigned to you in ATP. Go to %s%s to review it.' %
-            (self,
-             pi_name,
-             settings.EMAIL_URL_HOSTNAME,
-             self.get_absolute_url()),
-            'reply@email.gwu.edu',
-            recipients,
-            fail_silently=False)
+        if qa_comments:
+            send_mail(
+                'OVPR ATP Update',
+                '%s%s has been assigned to you in ATP. Go to %s%s to review it. \n QA Comments: %s' %
+                (self,
+                 pi_name,
+                 settings.EMAIL_URL_HOSTNAME,
+                 self.get_absolute_url(),
+                 qa_comments),
+                'reply@email.gwu.edu',
+                recipients,
+                fail_silently=False)
+        else:
+            send_mail(
+                'OVPR ATP Update',
+                '%s%s has been assigned to you in ATP. Go to %s%s to review it. ' %
+                (self,
+                 pi_name,
+                 settings.EMAIL_URL_HOSTNAME,
+                 self.get_absolute_url()),
+                'reply@email.gwu.edu',
+                recipients,
+                fail_silently=False)
 
     def send_award_setup_notification(self):
         """Sends an email to the AwardAcceptance user to let them know the award is in Award Setup"""
@@ -1479,6 +1547,56 @@ Please go to %s%s to review it.' % (self, settings.EMAIL_URL_HOSTNAME, self.get_
         if all([self.status == 2, self.subaward_user, self.award_dual_setup]):
             self.send_email_update_if_subaward_user()
         self.update_completion_date_in_atp_award()
+        return True
+
+    def save_and_send_to_qa_user(self):
+        """
+        This will assign a QA user to the current award, but award will not move to next step
+        insted it will assign a new role to the current stage
+        """
+        self.assigned_to_qa = True
+        self.qa_complete = False
+        self.save()
+        try:
+            for pta in PTANumber.objects.filter(award_id=self.id):
+                if not pta.qa_work_flow:
+                    pta.qa_work_flow = True
+                    pta.save()
+        except:
+            pass
+        if self.send_to_modification:
+            modification_object = AwardModification.objects.all().filter(award=self, is_edited=True).order_by('-id')
+            if modification_object:
+                modification_obj = modification_object[0]
+                modification_obj.qa_assign_date = timezone.localtime(timezone.now())
+                modification_obj.save()
+        else:
+            setup = self.awardsetup
+            setup.qa_assign_date = timezone.localtime(timezone.now())
+            setup.save()
+
+        origional_text = 'Original Award'
+        workflow = 'QualityAssurance'
+        acceptance_count = AwardAcceptance.objects.filter(award=self).count()
+        if acceptance_count < 2:
+            modification = origional_text
+        else:
+            modification = "Modification #%s" % (acceptance_count - 1)
+
+        user_name = self.get_user_full_name(workflow)
+        try:
+            trail_object = ATPAuditTrail.objects.get(award=self.id, modification=modification, workflow_step=workflow,
+                                                     assigned_user=user_name)
+        except:
+            trail_object = None
+        if trail_object:
+            trail_object.date_completed = datetime.now()
+        else:
+            trail_object = ATPAuditTrail(award=self.id, modification=modification, workflow_step=workflow,
+                                         date_created=datetime.now(), assigned_user=user_name)
+        trail_object.save()
+
+        self.send_email_update_to_qa()
         return True
 
     def move_award_to_negotiation_and_modification(self, dual_modification):
@@ -2590,7 +2708,7 @@ class AwardAcceptance(AwardModificationMixin, AwardSection):
                             'fi': 5,
                             'ni': 9
                             }
-    HIDDEN_FIELDS = AwardSection.HIDDEN_FIELDS + ['current_modification', 'award_text']
+    HIDDEN_FIELDS = AwardSection.HIDDEN_FIELDS + ['current_modification']
 
     HIDDEN_SEARCH_FIELDS = AwardSection.HIDDEN_SEARCH_FIELDS + [
         'fcoi_cleared_date',
@@ -2917,7 +3035,6 @@ class AwardAcceptance(AwardModificationMixin, AwardSection):
         verbose_name='GMO/CO email')
     pta_modification = models.NullBooleanField(verbose_name='Do you want to send this to the post-award team for modification?')
     acceptance_completion_date = models.DateTimeField(blank=True, null=True, verbose_name='Completion Date')
-    award_text = models.CharField(max_length=50, blank=True, null=True)
 
     def __unicode__(self):
         return u'Award Intake %s' % (self.id)
@@ -3074,7 +3191,7 @@ class AwardNegotiation(AwardModificationMixin, AssignableAwardSection):
         ('UD', 'Unrealized')
     )
 
-    HIDDEN_FIELDS = AwardSection.HIDDEN_FIELDS + ['current_modification', 'date_received', 'award_text']
+    HIDDEN_FIELDS = AwardSection.HIDDEN_FIELDS + ['current_modification', 'date_received']
 
     HIDDEN_SEARCH_FIELDS = AwardSection.HIDDEN_SEARCH_FIELDS + [
         'subcontracting_plan',
@@ -3156,7 +3273,6 @@ class AwardNegotiation(AwardModificationMixin, AssignableAwardSection):
     publication_restriction = models.NullBooleanField(
         verbose_name='Publication Restriction?')
     negotiation_completion_date = models.DateTimeField(blank=True, null=True, verbose_name='Completion Date')
-    award_text = models.CharField(max_length=50, blank=True, null=True)
 
     def __unicode__(self):
         return u'Award Negotiation %s' % (self.id)
@@ -3505,6 +3621,7 @@ class AwardSetup(AssignableAwardSection):
         verbose_name='Ready for EAS Setup?')
 
     wait_for = models.TextField(blank=True)
+    qa_assign_date = models.DateTimeField(blank=True, null=True, verbose_name='Assigned To QA')
     setup_completion_date = models.DateTimeField(blank=True, null=True, verbose_name='Completion Date')
 
     def __unicode__(self):
@@ -3524,15 +3641,7 @@ class AwardSetup(AssignableAwardSection):
             self.save()
 
     def get_waiting_reason(self):
-        return self.WAIT_FOR.get(self.wait_for_reson) if self.wait_for_reson else ''
-
-    def get_modification_waiting_reason(self):
-        modification = AwardModification.objects.filter(award_id=self.award_id).order_by('-date_wait_for_updated')
-        return self.WAIT_FOR.get(modification[0].wait_for_reson) if modification else ''
-
-    def get_modification_wait_for_updated(self):
-        modification = AwardModification.objects.filter(award_id=self.award_id).order_by('-date_wait_for_updated')
-        return modification[0].date_wait_for_updated if modification else ''
+            return self.WAIT_FOR.get(self.wait_for_reson) if self.wait_for_reson else ''
 
 class AwardModification(AssignableAwardSection):
     """Model for the AwardModification data"""
@@ -3861,9 +3970,10 @@ class AwardModification(AssignableAwardSection):
         max_length=3,
         blank=True,
         verbose_name='Ready for EAS Setup?')
-    modification_completion_date = models.DateTimeField(blank=True, null=True, verbose_name='Completion Date')
 
     wait_for = models.TextField(blank=True)
+    qa_assign_date = models.DateTimeField(blank=True, null=True, verbose_name='Assigned To QA')
+    modification_completion_date = models.DateTimeField(blank=True, null=True, verbose_name='Completion Date')
 
     def __unicode__(self):
         return u'Award Modification %s' % (self.id)
@@ -3907,9 +4017,44 @@ class PTANumber(FieldIteratorMixin, models.Model):
         ('C', 'Closed')
     )
 
+    TASKS_CHOICES = (('B', 'Absolute'), ('D', 'Advisory'), ('N', 'None'))
+    AWARD_CHOICES = (('B', 'Absolute'), ('D', 'Advisory'), ('N', 'None'))
+
     HIDDEN_FIELDS = ['award']
 
-    HIDDEN_TABLE_FIELDS = []
+    HIDDEN_TABLE_FIELDS = [
+        'cbk_project_number',
+        'cbk_task_number',
+        'cbk_award_number',
+        'cbk_award_setup_complete',
+        'cbk_total_pta_amount',
+        'cbk_parent_banner_number',
+        'cbk_banner_number',
+        'cbk_cs_banner_number',
+        'cbk_principal_investigator',
+        'cbk_agency_name',
+        'cbk_department_name',
+        'cbk_project_title',
+        'cbk_who_is_prime',
+        'cbk_award_template',
+        'cbk_cfda_number',
+        'cbk_allowed_cost_schedule',
+        'cbk_eas_award_type',
+        'cbk_preaward_date',
+        'cbk_start_date',
+        'cbk_end_date',
+        'cbk_final_reports_due_date',
+        'cbk_federal_negotiated_rate',
+        'cbk_indirect_cost_schedule',
+        'cbk_sp_type',
+        'cbk_short_name',
+        'cbk_agency_award_number',
+        'cbk_sponsor_award_number',
+        'cbk_ready_for_eas_setup',
+        'cbk_eas_status',
+        'cbk_award_lov',
+        'cbk_tasks_lov'
+    ]
 
     HIDDEN_SEARCH_FIELDS = AwardSection.HIDDEN_SEARCH_FIELDS + [
         'parent_banner_number',
@@ -3929,36 +4074,44 @@ class PTANumber(FieldIteratorMixin, models.Model):
         max_length=100,
         blank=True,
         verbose_name='Project #')
+    cbk_project_number = models.BooleanField(default=False, verbose_name='')
     task_number = models.CharField(
         max_length=100,
         blank=True,
         verbose_name='Task #')
+    cbk_task_number = models.BooleanField(default=False, verbose_name='')
     award_number = models.CharField(
         max_length=100,
         blank=True,
         verbose_name='Award #')
+    cbk_award_number = models.BooleanField(default=False, verbose_name='')
     award_setup_complete = models.DateField(
         null=True,
         blank=True,
         verbose_name='Award Setup Complete')
+    cbk_award_setup_complete = models.BooleanField(default=False, verbose_name='')
     total_pta_amount = models.DecimalField(
         decimal_places=2,
         max_digits=10,
         null=True,
         blank=True,
         verbose_name='Total PTA Amt')
+    cbk_total_pta_amount = models.BooleanField(default=False, verbose_name='')
     parent_banner_number = models.CharField(
         max_length=100,
         blank=True,
         verbose_name='Prnt Banner #')
+    cbk_parent_banner_number = models.BooleanField(default=False, verbose_name='')
     banner_number = models.CharField(
         max_length=100,
         blank=True,
         verbose_name='Banner #')
+    cbk_banner_number = models.BooleanField(default=False, verbose_name='')
     cs_banner_number = models.CharField(
         max_length=100,
         blank=True,
         verbose_name='CS Banner #')
+    cbk_cs_banner_number = models.BooleanField(default=False, verbose_name='')
     principal_investigator = models.ForeignKey(
         AwardManager,
         null=True,
@@ -3966,6 +4119,7 @@ class PTANumber(FieldIteratorMixin, models.Model):
         limit_choices_to={
             'active': True},
         verbose_name='PI*')
+    cbk_principal_investigator = models.BooleanField(default=False, verbose_name='')
     agency_name = models.ForeignKey(
         FundingSource,
         null=True,
@@ -3973,6 +4127,7 @@ class PTANumber(FieldIteratorMixin, models.Model):
         limit_choices_to={
             'active': True},
         verbose_name='Agency Name*')
+    cbk_agency_name = models.BooleanField(default=False, verbose_name='')
     department_name = models.ForeignKey(
             AwardOrganization,
             null=True,
@@ -3980,13 +4135,16 @@ class PTANumber(FieldIteratorMixin, models.Model):
             limit_choices_to={
                 'active': True},
             verbose_name='Department Code & Name*')
+    cbk_department_name = models.BooleanField(default=False, verbose_name='')
     project_title = models.CharField(max_length=256, blank=True, verbose_name='Project Title*')
+    cbk_project_title = models.BooleanField(default=False, verbose_name='')
     who_is_prime = models.ForeignKey(
             PrimeSponsor,
             null=True,
             blank=True,
             limit_choices_to={
                 'active': True})
+    cbk_who_is_prime = models.BooleanField(default=False, verbose_name='')
     allowed_cost_schedule = models.ForeignKey(
         AllowedCostSchedule,
         null=True,
@@ -3994,6 +4152,7 @@ class PTANumber(FieldIteratorMixin, models.Model):
         limit_choices_to={
             'active': True},
         verbose_name='Allowed Cost Schedule*')
+    cbk_allowed_cost_schedule = models.BooleanField(default=False, verbose_name='')
     award_template = models.ForeignKey(
         AwardTemplate,
         null=True,
@@ -4001,6 +4160,7 @@ class PTANumber(FieldIteratorMixin, models.Model):
         limit_choices_to={
             'active': True},
         verbose_name='Award Template*')
+    cbk_award_template = models.BooleanField(default=False, verbose_name='')
     cfda_number = models.ForeignKey(
         CFDANumber,
         null=True,
@@ -4008,18 +4168,24 @@ class PTANumber(FieldIteratorMixin, models.Model):
         limit_choices_to={
             'active': True},
         verbose_name='CFDA number*')
+    cbk_cfda_number = models.BooleanField(default=False, verbose_name='')
     eas_award_type = models.CharField(
         choices=EAS_AWARD_CHOICES,
         max_length=2,
         blank=True,
         verbose_name='EAS Award Type*')
+    cbk_eas_award_type = models.BooleanField(default=False, verbose_name='')
     preaward_date = models.DateField(null=True, blank=True)
+    cbk_preaward_date = models.BooleanField(default=False, verbose_name='')
     start_date = models.DateField(null=True, blank=True, verbose_name='Start Date*')
+    cbk_start_date = models.BooleanField(default=False, verbose_name='')
     end_date = models.DateField(null=True, blank=True, verbose_name='End Date*')
+    cbk_end_date = models.BooleanField(default=False, verbose_name='')
     final_reports_due_date = models.DateField(
         null=True,
         blank=True,
         verbose_name='Final Reports/Final Invoice Due Date (Close Date)*')
+    cbk_final_reports_due_date = models.BooleanField(default=False, verbose_name='')
     federal_negotiated_rate = models.ForeignKey(
         FedNegRate,
         null=True,
@@ -4027,6 +4193,7 @@ class PTANumber(FieldIteratorMixin, models.Model):
         limit_choices_to={
             'active': True},
         verbose_name='Federal Negotiated Rate*')
+    cbk_federal_negotiated_rate = models.BooleanField(default=False, verbose_name='')
     indirect_cost_schedule = models.ForeignKey(
         IndirectCost,
         null=True,
@@ -4034,39 +4201,59 @@ class PTANumber(FieldIteratorMixin, models.Model):
         limit_choices_to={
             'active': True},
         verbose_name='Indirect Cost Schedule*')
+    cbk_indirect_cost_schedule = models.BooleanField(default=False, verbose_name='')
     sp_type = models.CharField(
         choices=SP_TYPE_CHOICES,
         max_length=3,
         blank=True,
         verbose_name='SP Type*')
+    cbk_sp_type = models.BooleanField(default=False, verbose_name='')
     short_name = models.CharField(
         max_length=30,
         blank=True,
         verbose_name='Award Short Name*')
+    cbk_short_name = models.BooleanField(default=False, verbose_name='')
     agency_award_number = models.CharField(
         max_length=50, 
         blank=True, 
         verbose_name='Agency Award Number*')
+    cbk_agency_award_number = models.BooleanField(default=False, verbose_name='')
     sponsor_award_number = models.CharField(
         max_length=50,
         blank=True,
         verbose_name='Prime Award # (if GW is subawardee)*')
+    cbk_sponsor_award_number = models.BooleanField(default=False, verbose_name='')
     sponsor_banner_number = models.CharField(max_length=50, blank=True)
+    cbk_sponsor_banner_number = models.BooleanField(default=False, verbose_name='')
     eas_status = models.CharField(
         choices=EAS_STATUS_CHOICES,
         max_length=2,
         blank=True,
         verbose_name='EAS Status*')
+    cbk_eas_status = models.BooleanField(default=False, verbose_name='')
     ready_for_eas_setup = models.CharField(
         choices=EAS_SETUP_CHOICES,
         max_length=3,
         blank=True,
         verbose_name='Ready for EAS Setup?')
+    cbk_ready_for_eas_setup = models.BooleanField(default=False, verbose_name='')
 
     is_edited = models.BooleanField(default=False)
-    pta_number_updated = models.DateField(
-        null=True,
-        blank=True)
+    pta_number_updated = models.DateTimeField(auto_now_add=True, blank=True, null=True)
+    award_lov = models.CharField(
+        choices=AWARD_CHOICES,
+        max_length=2,
+        blank=True,
+        verbose_name='Award*')
+    cbk_award_lov = models.BooleanField(default=False, verbose_name='')
+    tasks_lov = models.CharField(
+        choices=TASKS_CHOICES,
+        max_length=2,
+        blank=True,
+        verbose_name='Tasks*')
+    cbk_tasks_lov = models.BooleanField(default=False, verbose_name='')
+    qa_comments = models.TextField(blank=True, verbose_name='QA Comments')
+    qa_work_flow = models.NullBooleanField(verbose_name='Workflow')
 
     def __unicode__(self):
         return u'PTA #%s' % (self.project_number)
@@ -4139,6 +4326,166 @@ class PTANumber(FieldIteratorMixin, models.Model):
             user = 'ATP'
         return (user, latest_revision.date_created)
 
+class Reports(models.Model):
+    """
+    Model for the reports, values to this table coming from EAS
+    """
+    EAS_FIELD_ORDER = [
+        'id',
+        'report_name',
+        'end_date',
+        'active'
+    ]
+
+    id = models.BigIntegerField(primary_key=True, unique=True)
+    report_name = models.CharField(max_length=150)
+    end_date = models.DateField(null=True, blank=True)
+    active = models.BooleanField()
+
+    def __unicode__(self):
+        return unicode(self.report_name)
+
+    class Meta:
+        ordering = ['report_name']
+
+class ReportIDS(models.Model):
+    """
+    Model for the report values to be stored as per PTA Number
+    """
+    FREQUENCY_CHOICES = (
+        ('ANNUALLY', 'Annually'),
+        ('END_OF_AWARD', 'End of Award'),
+        ('END_OF_INSTALLMENT', 'End of Installment'),
+        ('MONTHLY', 'Monthly'),
+        ('QUARTERLY', 'Quarterly')
+    )
+    pta_number = models.ForeignKey(PTANumber)
+    report_name = models.ForeignKey(Reports, null=True, blank=True,
+        limit_choices_to={
+            'active': True},
+        related_name='+',
+        verbose_name='Report*')
+    cbk_report_name = models.BooleanField(default=False, verbose_name='')
+    frequency = models.CharField(
+        choices=FREQUENCY_CHOICES,
+        max_length=30,
+        null=True,
+        blank=True,
+        verbose_name='Frequency')
+    cbk_frequency = models.BooleanField(default=False, verbose_name='')
+    due_within_days = models.CharField(
+        max_length=4,
+        blank=True,
+        verbose_name='Due Within Days')
+    cbk_due_within_days = models.BooleanField(default=False, verbose_name='')
+    no_of_copies = models.PositiveIntegerField(null=True, blank=True, verbose_name='No. of Copies')
+    cbk_no_of_copies = models.BooleanField(default=False, verbose_name='')
+    due_dates = models.DateField(null=True, blank=True)
+    cbk_due_dates = models.BooleanField(default=False, verbose_name='')
+
+    def __unicode__(self):
+        return unicode(self.report_name)
+
+    def get_frequencey(self):
+        if self.frequency == 'ANNUALLY':
+            return 'Annually'
+        elif self.frequency == 'END_OF_AWARD':
+            return 'End of Award'
+        elif self.frequency == 'END_OF_INSTALLMENT':
+            return 'End of Installment'
+        elif self.frequency == 'MONTHLY':
+            return 'Monthly'
+        elif self.frequency == 'QUARTERLY':
+            return 'Quarterly'
+        else:
+            return None
+
+    def get_checkbox_value(self):
+        if self.cbk_due_dates or self.cbk_due_within_days or self.cbk_frequency or \
+                self.cbk_no_of_copies or self.cbk_report_name:
+            return True
+        return False
+
+    def get_show_dates(self):
+        if self.frequency == 'QUARTERLY' or self.frequency == 'MONTHLY' or self.frequency == 'ANNUALLY':
+            return True
+        return False
+
+
+class TermsAndConditions(models.Model):
+    """
+    Model for the TermsAndConditions, values to this table coming from EAS
+    """
+    EAS_FIELD_ORDER = [
+        'category_id',
+        'term_code_id',
+        'category_name',
+        'term_code_name',
+        'end_date',
+        'active'
+    ]
+
+    category_id = models.IntegerField(null=True)
+    term_code_id = models.IntegerField(primary_key=True, unique=True)
+    category_name = models.CharField(max_length=150)
+    term_code_name = models.CharField(max_length=150, null=True)
+    end_date = models.DateField(null=True, blank=True)
+    active = models.BooleanField()
+
+    def __unicode__(self):
+        return unicode(self.category_name)
+
+class TermsAndConditionsIDS(models.Model):
+    """
+    Model for the TermsAndConditions values to be stored as per PTA Number
+    """
+    CATEGORY_CHOICES = [(u'', u'---------'), ]
+    tc_codes = TermsAndConditions.objects.filter(active=True)
+    codes = TermsAndConditions.objects.filter(active=True).values('category_name').distinct()
+    codes_list = []
+    for cd in codes:
+        codes_list.append(cd['category_name'])
+    for tc in tc_codes:
+        if tc.category_name in codes_list:
+            CATEGORY_CHOICES.append((str(tc.category_id), tc.category_name))
+            codes_list.remove(tc.category_name)
+
+    CODE_CHOICES = [(u'', u'---------'), ]
+    for cd in tc_codes:
+        CODE_CHOICES.append((str(cd.term_code_id), cd.term_code_name))
+    pta_number = models.ForeignKey(PTANumber)
+    category = models.CharField(
+        choices=CATEGORY_CHOICES,
+        max_length=100, null=True, blank=True, verbose_name='Category*')
+    cbk_category = models.BooleanField(default=False, verbose_name='')
+    code = models.CharField(
+        choices=CODE_CHOICES,
+        max_length=100, null=True, blank=True, verbose_name='Code*')
+    cbk_code = models.BooleanField(default=False, verbose_name='')
+
+    def __unicode__(self):
+        return unicode(self.category)
+
+    def get_checkbox_value(self):
+        if self.cbk_category or self.cbk_code:
+            return True
+        return False
+
+    def get_code_name(self):
+        try:
+            terms = TermsAndConditions.objects.filter(term_code_id=self.code)
+            term_code = terms[0].term_code_name
+        except:
+            term_code = ''
+        return term_code
+
+    def get_category_name(self):
+        try:
+            terms = TermsAndConditions.objects.filter(category_id=self.category)
+            category = terms[0].category_name
+        except:
+            category = ''
+        return category
 
 class Subaward(AwardSection):
     """Model for the Subaward data"""

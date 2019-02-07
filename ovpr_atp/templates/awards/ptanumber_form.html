@@ -10,6 +10,22 @@
 {% crispy form %}
 
 <script>
+$('#id_award_lov').val('AB');
+$('#id_tasks_lov').val('AB');
+$('#id_eas_status').change(function(){
+    if($(this).val()=='AR'){
+        $('#id_award_lov').val('N');
+        $('#id_tasks_lov').val('N');
+    }
+    else if ($(this).val()=='A'){
+        $('#id_award_lov').val('AB');
+        $('#id_tasks_lov').val('AB');
+    }
+    else{
+        $('#id_award_lov').val('');
+        $('#id_tasks_lov').val('');
+    }
+})
 
 $(document).ready(function() {
 

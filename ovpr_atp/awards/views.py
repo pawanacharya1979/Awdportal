@@ -4,7 +4,7 @@
 # See Django documentation at https://docs.djangoproject.com/en/1.6/topics/http/views/
 # and https://docs.djangoproject.com/en/1.6/topics/class-based-views/
 
-import re
+import math
 from django.shortcuts import render, redirect, get_object_or_404, resolve_url
 from django.http import Http404, HttpResponseRedirect, HttpResponse
 from django.core import management
@@ -21,27 +21,36 @@ from django.utils import timezone
 from django.contrib.auth import (
     REDIRECT_FIELD_NAME, get_user_model, logout as auth_logout, update_session_auth_hash,
 )
+from django import forms
+from django.template.loader import render_to_string
 from django.utils.translation import LANGUAGE_SESSION_KEY
 from crispy_forms.utils import render_crispy_form
 import copy
 import csv
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+import calendar
 import json
 from StringIO import StringIO
 import xlwt
 from dateutil.tz import tzutc, tzlocal
 
-from .forms import AwardForm, EditAwardForm, ProposalIntakeStandaloneForm, ProposalIntakeForm, ProposalForm, \
-    KeyPersonnelForm, PerformanceSiteForm, AwardAcceptanceForm, AwardNegotiationForm, AwardSetupForm, PTANumberForm, \
-    SubawardListForm, SubawardForm, AwardManagementForm, PriorApprovalForm, ReportSubmissionForm, AwardCloseoutForm, \
-    FinalReportForm, EASMappingForm, ProposalStatisticsReportForm, AwardREAssaignementForm
-from .models import ProposalIntake, Proposal, KeyPersonnel, PerformanceSite, Award, AwardAcceptance, AwardNegotiation,\
-    AwardSetup, PTANumber, Subaward, AwardManagement, PriorApproval, ReportSubmission, AwardCloseout, FinalReport, \
-    EASMapping, EASMappingException, AwardModification, NegotiationStatus, ATPAuditTrail
+from .forms import (
+    AwardForm, EditAwardForm, ProposalIntakeStandaloneForm, ProposalIntakeForm,
+    ProposalForm, KeyPersonnelForm, PerformanceSiteForm, AwardAcceptanceForm,
+    AwardNegotiationForm, AwardSetupForm, PTANumberForm, SubawardListForm,
+    SubawardForm, AwardManagementForm, PriorApprovalForm, ReportSubmissionForm,
+    AwardCloseoutForm, FinalReportForm, EASMappingForm, ProposalStatisticsReportForm,
+    ReportsForm, TermsAndConditionsForm, AwardREAssaignementForm, CreatePTANumberForm, )
+from .models import (
+    ProposalIntake, Proposal, KeyPersonnel, PerformanceSite, Award, AwardAcceptance,
+    AwardNegotiation, AwardSetup, PTANumber, Subaward, AwardManagement, PriorApproval,
+    ReportSubmission, AwardCloseout, FinalReport, EASMapping, EASMappingException,
+    AwardModification, NegotiationStatus, ATPAuditTrail, ReportIDS, TermsAndConditionsIDS,
+    TermsAndConditions, )
 from .utils import get_cayuse_submissions, get_cayuse_summary, get_cayuse_pi, get_key_personnel, get_performance_sites, \
-    cast_lotus_value, get_proposal_statistics_report, get_cayuse_submissions_from_proposals_table
-
+    cast_lotus_value, get_proposal_statistics_report
 from core.utils import make_eas_request
+from fm.views import AjaxCreateView, AjaxUpdateView, AjaxDeleteView
 
 
 @login_required
@@ -257,18 +266,14 @@ def get_awards_ajax(request):
                           if all([award.award_dual_negotiation, award.award_dual_setup, award.status == 2]) or
                              all([award.award_dual_modification, award.status == 2])
                           else award.get_status_display())
-        if award.status == 3:
-            wait_for = ATPAuditTrail.objects.filter(award=award.id, date_completed=None).exclude(
-                Q(Q(workflow_step='AwardAcceptance') | Q(workflow_step='AwardNegotiation') |
-                  Q(workflow_step='AwardSetup') | Q(workflow_step='Subaward') |
-                  Q(workflow_step='AwardManagement') | Q(workflow_step='AwardCloseout') |
-                  Q(workflow_step='AwardModification')
-                  )).order_by('-id')
-            award_data.append(str(wait_for[0].workflow_step)
-                              if (wait_for)
-                              else None)
+
+        if award.quality_assurance_user and award.assigned_to_qa:
+            award_data.append('Quality Assurance')
+        elif award.status == 3:
+            award_data.append(Award.WAIT_FOR.get(award.awardsetup.wait_for_reson))
         else:
             award_data.append(None)
+
         response['data'].append(award_data)
 
     json_data = json.dumps(response)
@@ -670,56 +675,13 @@ def pick_proposal(request, award_pk, lotus=False):
         template = 'awards/lotus_proposal_list.html'
     else:
         if 'all-proposals' in request.GET:
-            #data['proposals'] = get_cayuse_submissions(True)
-            data['proposals'] = get_cayuse_submissions_from_proposals_table(True)
+            data['proposals'] = get_cayuse_submissions(True)
             data['all_proposals'] = True
         else:
-            #data['proposals'] = get_cayuse_submissions()
-            data['proposals'] = get_cayuse_submissions_from_proposals_table()
+            data['proposals'] = get_cayuse_submissions()
         template = 'awards/proposal_list.html'
 
     return render(request, template, data)
-
-@login_required
-def get_cayuse_proposals(request):
-    proposals, missed_mappings, missed_pi, missed_whois, missed_dprt, missed_agency = get_cayuse_submissions()
-    missed_mappings = set(missed_mappings)
-    successful_imports = []
-
-    for proposal in proposals:
-        if not proposal['proposal_id'] in list(missed_mappings):
-            prop = Proposal(**proposal)
-            prop.save()
-            successful_imports.append(proposal['proposal_id'])
-
-
-    return render(request, 'awards/import_cayuse_proposals.html', {'missed_mappings': missed_mappings,
-                                                                   'proposal_count': len(successful_imports),
-                                                                   'missed_pi': missed_pi,
-                                                                   'missed_whois': missed_whois,
-                                                                   'missed_dprt': missed_dprt,
-                                                                   'missed_agency': missed_agency,
-                                                                   'successful_imports': successful_imports})
-
-@login_required
-def get_all_cayuse_proposals(request):
-    proposals, missed_mappings, missed_pi, missed_whois, missed_dprt, missed_agency = get_cayuse_submissions(True)
-    missed_mappings = set(missed_mappings)
-    successful_imports = []
-
-    for proposal in proposals:
-        if not proposal['proposal_id'] in list(missed_mappings):
-            prop = Proposal(**proposal)
-            prop.save()
-            successful_imports.append(proposal['proposal_id'])
-
-    return render(request, 'awards/import_cayuse_proposals.html', {'missed_mappings': missed_mappings,
-                                                                   'proposal_count': len(successful_imports),
-                                                                   'missed_pi': missed_pi,
-                                                                   'missed_whois': missed_whois,
-                                                                   'missed_dprt': missed_dprt,
-                                                                   'missed_agency': missed_agency,
-                                                                   'successful_imports':successful_imports})
 
 
 @login_required
@@ -888,15 +850,9 @@ def create_modification(request, award_pk):
         return render(request,
                       'awards/confirm_modification.html', {'award': award,
                                                            'editable_sections': award.get_editable_sections()})
-    elif request.method == 'POST' and request.POST.get('_method'):
-        return render(request,
-                      'awards/rename_modification_award.html', {'award': award,
-                                                                'editable_sections': award.get_editable_sections(),
-                                                                })
     else:
         with transaction.atomic():
             # Duplicate the AwardAcceptance and AwardNegotiation objects
-            award_type = request.POST.get('award_type')
             for current_section in [award.get_current_award_acceptance(), award.get_current_award_negotiation()]:
                 new_section = current_section
 
@@ -908,26 +864,9 @@ def create_modification(request, award_pk):
 
                 current_section.save()
 
-                if award_type == 'Modification':
-                    modification_list = []
-                    award_acceptance = AwardAcceptance.objects.filter(
-                        award_id=award.id).exclude(award_text__in=['Original Award',
-                                                                   'Administrative Establishment',
-                                                                   'Administrative Funding'])
-                    for accept in award_acceptance:
-                        if accept.award_text and '#' in accept.award_text:
-                            modification_list.append(int(re.search(r'\d+', accept.award_text).group()))
-                    if modification_list:
-                        award_type = 'Modification #%d' % (max(modification_list) + 1)
-                    elif len(award_acceptance) > 1:
-                        award_type = 'Modification #%d' % (len(award_acceptance))
-                    else:
-                        award_type = 'Modification #1'
-
                 new_section.pk = None
                 new_section.date_assigned = None
                 new_section.current_modification = True
-                new_section.award_text = award_type
                 if hasattr(new_section, 'acceptance_completion_date'):
                     new_section.acceptance_completion_date = None
                 if hasattr(new_section, 'negotiation_completion_date'):
@@ -973,6 +912,8 @@ def create_modification(request, award_pk):
         award.send_to_modification = False
         award.award_dual_modification = False
         award.common_modification = False
+        award.qa_complete = False
+        award.assigned_to_qa = False
 
         award.save(check_status=False)
         award.send_email_update()
@@ -1024,24 +965,6 @@ class CreateAwardView(CreateView):
         return redirect
 
 
-def get_award_type_value(request, award_id):
-    return render(request, 'awards/rename_original_award.html', {'award_pk': award_id})
-
-def redirect_to_award_details(request, award_pk):
-    """
-    This method is going to move award to next stage and then redirect to the award details page
-    :param request: request object
-    :param award_pk: award id
-    :return: HttpResponse will redirect the award details page
-    """
-    award = Award.objects.get(id=award_pk)
-    award.move_to_next_step()
-    award_text = request.POST.get('award_text')
-    award.award_text = award_text
-    award.save()
-    return HttpResponseRedirect(award.get_absolute_url())
-
-
 class CreateAwardStandaloneView(CreateView):
     """Create an award from the homepage"""
 
@@ -1049,11 +972,10 @@ class CreateAwardStandaloneView(CreateView):
     form_class = AwardForm
 
     def form_valid(self, form):
-        #redirect = super(CreateAwardStandaloneView, self).form_valid(form)
-        super(CreateAwardStandaloneView, self).form_valid(form)
-        #self.object.move_to_next_step()
-        #return redirect
-        return get_award_type_value(self.request, self.object.id)
+        redirect = super(CreateAwardStandaloneView, self).form_valid(form)
+        self.object.move_to_next_step()
+        return redirect
+
 
 
 class EditAwardView(UpdateView):
@@ -1169,6 +1091,28 @@ class MoveToNextStepMixin(object):
         origional_text = 'Original Award'
         setup_workflow = 'AwardSetup'
         modification_workflow = 'AwardModification'
+        if form.cleaned_data.get('save_and_send_qa'):
+            missed_values = {}
+            ptas = PTANumber.objects.filter(award=award, award_setup_complete__isnull=False,
+                                            start_date__gte=date(2018, 11, 1))
+            if not award.validation_rules:
+                for pta in ptas:
+                    resp = apply_validation_rules(pta.id)
+                    if resp.values():
+                        missed_values[pta.award_number] = resp.values()
+
+            if not missed_values:
+                award.save_and_send_to_qa_user()
+                messages.info(
+                    self.request,
+                    'This award has been moved to the Quality Assurance phase. It is now assigned to %s.' %
+                    (' and '.join(
+                            [
+                                user.get_full_name() for user in
+                                award.get_user_for_quality_assurance()])))
+                return HttpResponseRedirect(award.get_absolute_url())
+            return render(self.request, 'awards/failed_validation_rules.html', {'missed_values': missed_values})
+
         if form.cleaned_data.get('do_not_send_to_next_step'):
             messages.info(self.request, 'Award Setup for this award has been marked as complete. This award '
                                         'will not move to the next step until Award Negotiation is also completed.')
@@ -1219,8 +1163,52 @@ class MoveToNextStepMixin(object):
                              award.get_users_for_negotiation_and_moidification_sections()])))
             return HttpResponseRedirect(award.get_absolute_url())
 
-        if form.cleaned_data.get('move_to_next_step') or form.cleaned_data.get('move_to_multiple_steps'):
+        if form.cleaned_data.get('move_to_next_step') or form.cleaned_data.get('move_to_multiple_steps') \
+                or form.cleaned_data.get('return_assignment_submission'):
             dual_mode = False
+            if form.cleaned_data.get('return_assignment_submission') and award.assigned_to_qa:
+                award.assigned_to_qa = False
+                award.qa_complete = True
+                award.save()
+                pta_instance = PTANumber.objects.filter(award_id=award.id, is_edited=True).order_by(
+                    '-pta_number_updated')
+                if pta_instance:
+                    qa_comments = pta_instance[0].qa_comments
+                    award.send_email_update(qa_comments=qa_comments)
+                else:
+                    award.send_email_update()
+                messages.info(
+                    self.request,
+                    'This award has been moved to the %s phase. \
+                    It is now assigned to %s.' %
+                    (award.get_status_display(),
+                     ' and '.join(
+                         [
+                             user.get_full_name() for user in award.get_users_for_active_sections()])))
+
+                origional_text = 'Original Award'
+                workflow = 'QualityAssurance'
+                acceptance_count = AwardAcceptance.objects.filter(award=award).count()
+                if acceptance_count < 2:
+                    modification = origional_text
+                else:
+                    modification = "Modification #%s" % (acceptance_count - 1)
+
+                user_name = award.get_user_full_name(workflow)
+                try:
+                    trail_object = ATPAuditTrail.objects.get(award=award, modification=modification,
+                                                             workflow_step=workflow,
+                                                             assigned_user=user_name)
+                except:
+                    trail_object = None
+                if trail_object:
+                    trail_object.date_completed = datetime.now()
+                else:
+                    trail_object = ATPAuditTrail(award=award.id, modification=modification, workflow_step=workflow,
+                                                 date_created=datetime.now(), assigned_user=user_name)
+                trail_object.save()
+                return HttpResponseRedirect(award.get_absolute_url())
+
             if form.cleaned_data.get('pta_modification') and form.cleaned_data.get('move_to_next_step'):
                 award.move_setup_or_modification_step(modification_flag=True)
                 messages.info(
@@ -1506,7 +1494,7 @@ class ChildSectionMixin(object):
         else:
             child_object.award = Award.objects.get(pk=self.kwargs['award_pk'])
             if self.form_class == PTANumberForm:
-                child_object.is_edited=True
+                child_object.is_edited = True
                 child_object.pta_number_updated = datetime.now()
         child_object.save()
 
@@ -1747,9 +1735,10 @@ class CreatePTANumberView(
     """Create a new PTANumber"""
 
     model = PTANumber
-    form_class = PTANumberForm
+    form_class = CreatePTANumberForm
     parent_edit_url = 'edit_award_setup'
     disable_autosave = True
+    template_name = 'awards/ptanumber_form.html'
 
     def get_initial(self):
         """Gets the initial data used to populate some of the form fields"""
@@ -1789,7 +1778,442 @@ class EditPTANumberView(
     form_class = PTANumberForm
     parent_edit_url = 'edit_award_setup'
     pk_url_kwarg = 'pta_pk'
+    template_name = 'awards/ptanumber_edit_form.html'
 
+    def form_valid(self, form):
+        """Provides custom validation on the associated form.
+        Sets the associated Award or Proposal value, depending on which is appropriate.
+        """
+        award = Award.objects.get(pk=self.kwargs['award_pk'])
+        if self.request.POST.get('save_validate') and not award.validation_rules:
+            pta_number = self.object.id
+            response = apply_validation_rules(pta_number)
+            messages.info(self.request,
+                          response['federal_midc']) if response.get('federal_midc') else None
+            messages.error(self.request,
+                           response['final_exceed']) if response.get('final_exceed') else None
+            messages.error(self.request,
+                          response['cc_external_final']) if response.get('cc_external_final') else None
+            messages.error(self.request,
+                          response['final_report']) if response.get('final_report') else None
+            messages.error(self.request,
+                          response['property']) if response.get('property') else None
+            messages.error(self.request,
+                          response['guidance']) if response.get('guidance') else None
+            messages.error(self.request,
+                          response['cost_sharing']) if response.get('cost_sharing') else None
+            messages.error(self.request,
+                           response['due_date_match']) if response.get('due_date_match') else None
+            messages.error(self.request,
+                           response['cost_sharing_missed']) if response.get('cost_sharing_missed') else None
+
+            if len(response) == 1 and response.get('federal_midc') or not response:
+                pass
+            else:
+                return HttpResponseRedirect(self.get_success_url())
+
+        child_object = form.save(commit=False)
+        child_object.award = award
+        if self.form_class == PTANumberForm:
+            child_object.is_edited = True
+            child_object.pta_number_updated = datetime.now()
+        child_object.save()
+        self.object = child_object
+
+        if form.cleaned_data['return_to_parent']:
+            return HttpResponseRedirect(self.get_parent_url())
+        else:
+            return HttpResponseRedirect(self.get_success_url())
+
+    def get_context_data(self, **kwargs):
+        context = super(AwardContextMixin, self).get_context_data(**kwargs)
+        report_ids = []
+        tc_ids = []
+        # fields = context['form'].fields
+        # labels = fields.keys()
+        # if not self.request.user == self.object.award.quality_assurance_user:
+        #
+        #     context['form'].fields['qa_comments'].widget = forms.HiddenInput()
+        #     for label in labels:
+        #         if 'cbk_' in label:
+        #             context['form'].fields[label].widget=forms.HiddenInput()
+
+        award = Award.objects.get(pk=self.kwargs['award_pk'])
+        context['award'] = award
+        context['editable_sections'] = award.get_editable_sections()
+
+        if hasattr(self, 'disable_autosave'):
+            context['disable_autosave'] = self.disable_autosave
+        context['reports_form'] = ReportsForm(prefix='reports')
+        context['tc_form'] = TermsAndConditionsForm(prefix='tc_form')
+        tc_objects = TermsAndConditionsIDS.objects.filter(
+            pta_number=self.kwargs.get('pta_pk')).order_by('category')
+        report_objects = ReportIDS.objects.filter(
+            pta_number=self.kwargs.get('pta_pk')).order_by('report_name')
+
+        context['report_objects'] = report_objects
+        context['tc_objects'] = tc_objects
+        return context
+
+
+def apply_validation_rules(pta_number):
+    """
+    validate the rules on the pta number, if any rule fails it will be displayed as an error message
+    :param pta_number: it is a primary key of the ptanumber table
+    :return: returns a dictionary of failed rules as keys and corresponding statement as value
+    """
+    missed_rules = {}
+    reports = []
+    categories = []
+    pta = PTANumber.objects.get(id=pta_number)
+    tc_objects = TermsAndConditionsIDS.objects.filter(pta_number=pta_number)
+    report_objects = ReportIDS.objects.filter(pta_number=pta_number)
+    for report in report_objects:
+        if hasattr(report.report_name, 'report_name'):
+            reports.append(report.report_name.report_name.upper())
+    for tc in tc_objects:
+            categories.append(tc.get_category_name().upper() if tc.get_category_name() else '')
+    if sum('FINAL' in s for s in reports) == 1:
+        if not pta.final_reports_due_date:
+            missed_rules['due_date_match'] = '%s - The Final Report Due Date must match the Award Close Date' % (
+                pta.award_number)
+        else:
+            matched_flag = False
+            matched_rpt = next((s for s in reports if 'FINAL' in s), None)
+            for report in report_objects:
+                if hasattr(report.report_name, 'report_name') and report.report_name.report_name and \
+                                report.report_name.report_name.upper() == matched_rpt:
+                    if pta.final_reports_due_date == report.due_dates:
+                        matched_flag = True
+            if not matched_flag:
+                missed_rules['due_date_match'] = '%s - The Final Report Due Date must match the Award Close Date' % (
+                    pta.award_number)
+    elif sum('FINAL' in s for s in reports) == 0:
+        pass
+    else:
+        missed_rules['final_exceed'] = '%s - An award can have only 1 Final Report' % pta.award_number
+
+    if pta.award_number and pta.award_number[-1] == 'F':
+        if hasattr(pta.allowed_cost_schedule, 'name') and 'MTDC' in pta.allowed_cost_schedule.name:
+            pass
+        else:
+            missed_rules['federal_midc'] = '%s - Federal awards should have an "MTDC" Allowed Cost Schedule' % (
+                pta.award_number)
+    if pta.award_number and pta.award_number[0:2] == 'CC' and pta.eas_status == 'A':
+        agency_list = ['NATIONAL SCIENCE FOUNDATION', 'NATIONAL SCIENCE FOUNDATION-LOC']
+        final_flag = False
+        internal_flag = False
+        for rpt in reports:
+            if 'FINAL' in rpt:
+                final_flag = True
+            if 'INTERNAL' in rpt:
+                internal_flag = True
+        if final_flag and internal_flag:
+            if pta.agency_name.name not in agency_list:
+                missed_rules['cc_external_final'] = '%s - Cost-Cost awards must have an External Final Report' % (
+                    pta.award_number)
+        elif final_flag:
+            pass
+        else:
+            if pta.agency_name.name not in agency_list:
+                missed_rules['cc_external_final'] = '%s - Cost-Cost awards must have an External Final Report' % (
+                    pta.award_number)
+
+    if sum('FINAL' in s for s in reports) > 0:
+        pass
+    else:
+        missed_rules['final_report'] = '%s - Every award must have a Final Report' % pta.award_number
+
+    if 'PROPERTY & EQUIPMENT' in categories:
+        pass
+    else:
+        missed_rules['property'] = '%s - Every Award must have a PROPERTY & EQUIPMENT Term and Condition' % (
+            pta.award_number)
+
+    if pta.award_number:
+        if pta.award_number[-1] == 'F' and 'GUIDANCE' in categories:
+            pass
+        elif pta.award_number[-1] != 'F':
+            pass
+        else:
+            missed_rules['guidance'] = '%s - Federal awards must have a GUIDANCE Term and Condition' % (
+                pta.award_number)
+
+    if hasattr(pta.agency_name, 'name'):
+        if 'COST SHARING' in pta.agency_name.name:
+            if 'COST SHARING' in categories:
+                pass
+            else:
+                missed_rules['cost_sharing'] = '%s Cost Sharing awards must have a COST SHARING Term and Condition' % (
+                    pta.award_number)
+
+    if hasattr(pta.agency_name, 'name'):
+        if 'COST SHARING' in pta.agency_name.name and 'COST SHARING' in categories:
+            pass
+        if not 'COST SHARING' in pta.agency_name.name and 'COST SHARING' in categories:
+            missed_rules['cost_sharing_missed'] = '%s COST SHARING Term and Condition is only allowed on Cost Sharing awards' % (
+                pta.award_number)
+
+    return missed_rules
+
+
+def calculate_months(sourcedate, months):
+    month = sourcedate.month - 1 + months
+    year = sourcedate.year + month // 12
+    month = month % 12 + 1
+    day = min(sourcedate.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
+
+def calculate_months1(sourcedate, months):
+    month = sourcedate.month - 1 + months
+    year = sourcedate.year + month // 12
+    month = month % 12 + 1
+    day = calendar.monthrange(year,month)[1]
+    return date(year, month, day)
+
+
+class ReportsCreateView(AjaxCreateView):
+    form_class = ReportsForm
+    model = ReportIDS
+
+    def get_form_kwargs(self):
+        kwargs = super(ReportsCreateView, self).get_form_kwargs()
+        ptanum = PTANumber.objects.get(id=self.kwargs.get('pta_pk'))
+        kwargs['initial']['pta_number'] = ptanum
+        kwargs['initial']['form_name'] = "ReportsFormCreate"
+        return kwargs
+
+    def form_valid(self, form):
+        ptanum = PTANumber.objects.get(id=self.kwargs.get('pta_pk'))
+        try:
+            report_name = form.cleaned_data['report_name']
+            if report_name:
+                existing = ReportIDS.objects.get(
+                    report_name=report_name,
+                    pta_number=ptanum)
+            else:
+                form.add_error(None, 'Please fill the required fields')
+                return self.render_json_response(self.get_error_result(form))
+        except:
+            existing = None
+        if existing:
+            form.add_error(None, 'The record already exists. You entered a duplicate' 
+            ' value or sequence of values that must be unique for every record')
+            return self.render_json_response(self.get_error_result(form))
+        else:
+            response = update_due_date(form, self.kwargs.get('pta_pk'))
+            if response and self.request.is_ajax():
+                return self.render_json_response(self.get_success_result())
+
+
+def update_due_date(form, pta_number):
+    year = 365
+    due_days = datetime.now()
+    frequency_vals = {
+        'Annually': 'ANNUALLY', 'End of Award': 'END_OF_AWARD',
+        'End of Installment': 'END_OF_INSTALLMENT',
+        'Monthly': 'MONTHLY', 'Quarterly': 'QUARTERLY'
+        }
+    ptanum = PTANumber.objects.get(id=pta_number)
+    frequency = form.cleaned_data['frequency']
+    due_within_days = form.cleaned_data.get('due_within_days')
+
+    if not due_within_days:
+        due_within_days = 0
+    else:
+        due_within_days = int(due_within_days)
+    if frequency == frequency_vals['Annually']:
+        proposal_date = calculate_months(ptanum.start_date, 12)
+        frequency_limit = timedelta(days=due_within_days)
+        due_day = proposal_date + frequency_limit
+        if due_day <= ptanum.final_reports_due_date and due_day >= ptanum.start_date:
+            due_days = due_day
+        else:
+            due_days = None
+    elif frequency == frequency_vals['End of Award']:
+        frequency_limit = timedelta(days=due_within_days)
+        due_days = ptanum.end_date + frequency_limit
+    elif frequency == frequency_vals['End of Installment']:
+        frequency_limit = timedelta(days=due_within_days)
+        due_days = ptanum.end_date + frequency_limit
+    elif frequency == frequency_vals['Monthly']:
+        dt = ptanum.start_date
+        year = dt.year
+        month = dt.month
+        days = calendar.monthrange(year, month)[1]
+        dt = dt.replace(day=days)
+        due_within_days = timedelta(days=due_within_days)
+        due_day = dt + due_within_days
+        if due_day <= ptanum.final_reports_due_date:
+            due_days = due_day
+        else:
+            due_days = None
+    elif frequency == frequency_vals['Quarterly']:
+        proposal_date = calculate_months(ptanum.start_date, 3)
+        due_within_days = due_within_days - 1
+        frequency_limit = timedelta(days=due_within_days)
+        due_day = proposal_date + frequency_limit
+        if due_day <= ptanum.final_reports_due_date:
+            due_days = due_day
+        else:
+            due_days = None
+    else:
+        due_days = None
+    rpt = form.save(commit=False)
+    rpt.pta_number = ptanum
+    rpt.due_dates = due_days
+    rpt.save()
+    return 'success'
+
+def num_of_months_between_days(d1, d2):
+    return (d1.year - d2.year) * 12 + d1.month - d2.month + (d1.day - d2.day) / 30
+
+
+def show_due_dates(request, reports_pk):
+    result = []
+    try:
+        reportids = ReportIDS.objects.get(id=reports_pk)
+        pta_number = PTANumber.objects.get(id=reportids.pta_number_id)
+        proposal_date = pta_number.start_date + timedelta(days=int(reportids.due_within_days))
+    except:
+        pass
+    if reportids.frequency == 'QUARTERLY':
+        dt = pta_number.start_date
+        no_of_month = (num_of_months_between_days(pta_number.end_date , pta_number.start_date) + 1)
+        quarters = math.ceil((no_of_month)/3)
+        for qrtr in range(int(quarters)):
+            year = dt.year
+            month = dt.month
+            if dt.day == (calendar.monthrange(year, month)[1]):
+                 dt = calculate_months1(dt, 3)
+                 current_date = dt
+                 due_within_days = timedelta(days=int(reportids.due_within_days)-1)
+                 current_date = current_date + due_within_days
+            else:
+                 dt = calculate_months(dt, 3)
+                 current_date = dt
+                 due_within_days = timedelta(days=int(reportids.due_within_days) - 1)
+                 current_date = current_date + due_within_days
+
+            if current_date <= pta_number.final_reports_due_date:
+                result.append(current_date)
+            else:
+                break
+
+    elif reportids.frequency == 'ANNUALLY' and ((pta_number.end_date - pta_number.start_date).days >= 364):
+        proposal_date = pta_number.start_date
+        years = (pta_number.end_date - pta_number.start_date)/364
+        years = years.days
+        for year in range(0, years+1):
+            pro_year = proposal_date.year + year + 1
+            pro_years = proposal_date.replace(year=pro_year) + timedelta(days=int(reportids.due_within_days))
+            if pro_years <= pta_number.final_reports_due_date:
+                result.append(pro_years)
+            else:
+                break
+
+    elif reportids.frequency == 'MONTHLY':
+        months = num_of_months_between_days(pta_number.start_date, pta_number.end_date)
+        dt = pta_number.start_date
+        for num in range(abs(months)):
+            year = dt.year
+            month = dt.month
+            days = calendar.monthrange(year, month)[1]
+            dt = dt.replace(day=days)
+            current_month = dt
+            due_within_days = timedelta(days=int(reportids.due_within_days))
+            dt = dt + due_within_days
+            if dt <= pta_number.final_reports_due_date:
+                result.append(dt)
+            else:
+                break
+            dt = calculate_months(current_month, 1)
+    else:
+        None
+
+    resp = '<div style="height: 100px;"><table style="width:100%;"><tr><th>Report Name</th><th>Frequency</th><th>Due Date</th></tr>'
+    for repo in result:
+        resp = resp + '<tr><td>%s</td><td>%s</td><td>%s</td></tr>' % (
+            reportids.report_name, reportids.frequency, repo)
+    resp = resp + '</table></div>'
+
+#    roam = result[0]
+#    ReportIDS.objects.filter(id=reports_pk).update(due_dates=roam)
+    return HttpResponse(resp)
+
+class ReportsDeleteView(AjaxDeleteView):
+    model = ReportIDS
+    pk_url_kwarg = 'reports_pk'
+
+
+class ReportsUpdateView(AjaxUpdateView):
+
+    form_class = ReportsForm
+    model = ReportIDS
+    pk_url_kwarg = 'reports_pk'
+
+    def get_form_kwargs(self):
+        kwargs = super(ReportsUpdateView, self).get_form_kwargs()
+        kwargs['initial']['form_name'] = "ReportsFormUpdate"
+        return kwargs
+
+    def form_valid(self, form):
+        response = update_due_date(form, self.object.pta_number_id)
+        if response and self.request.is_ajax():
+            return self.render_json_response(self.get_success_result())
+
+
+class TCCreateView(AjaxCreateView):
+    form_class = TermsAndConditionsForm
+
+    def get_form_kwargs(self):
+        kwargs = super(TCCreateView, self).get_form_kwargs()
+        ptanum = PTANumber.objects.get(id=self.kwargs.get('pta_pk'))
+        kwargs['initial']['pta_number'] = ptanum
+        kwargs['initial']['form_name'] = "TermsAndConditionsFormCreate"
+        return kwargs
+
+    def form_valid(self, form):
+        ptanum = PTANumber.objects.get(id=self.kwargs.get('pta_pk'))
+        try:
+            code = form.cleaned_data['code']
+            category = form.cleaned_data['category']
+            if all([code, category]):
+                existing = TermsAndConditionsIDS.objects.get(
+                    code=int(code), category=int(category),
+                    pta_number=ptanum)
+            else:
+                form.add_error(None, 'Please fill the required fields')
+                return self.render_json_response(self.get_error_result(form))
+        except:
+            existing = None
+        if existing:
+            form.add_error(None, 'The record already exists. You entered a duplicate' 
+            ' value or sequence of values that must be unique for every record')
+            return self.render_json_response(self.get_error_result(form))
+        else:
+            rpt = form.save(commit=False)
+            rpt.pta_number = ptanum
+            rpt.save()
+            if self.request.is_ajax():
+                return self.render_json_response(self.get_success_result())
+
+
+class TCDeleteView(AjaxDeleteView):
+    model = TermsAndConditionsIDS
+    pk_url_kwarg = 'tc_pk'
+
+
+class TCUpdateView(AjaxUpdateView):
+
+    form_class = TermsAndConditionsForm
+    model = TermsAndConditionsIDS
+    pk_url_kwarg = 'tc_pk'
+
+    def get_form_kwargs(self):
+        kwargs = super(TCUpdateView, self).get_form_kwargs()
+        kwargs['initial']['form_name'] = "TermsAndConditionsFormUpdate"
+        return kwargs
 
 class DeletePTANumberView(
         CheckEditPermissionsMixin,
@@ -2073,6 +2497,12 @@ class ProposalStatisticsReportView(FormView):
 
         return response
 
+def get_codes_for_category(request, category_id):
+    resp = '<option value="">---------</option>'
+    codes = TermsAndConditions.objects.filter(active=True, category_id=int(category_id))
+    for code in codes:
+        resp = resp + '<option value="%s">%s</option>' % (code.term_code_id, code.term_code_name)
+    return HttpResponse(resp)
 
 class AwardREAssaignmentView(FormView):
     """Grab all the awards from the atp awards table and re-assign to a selected user"""
@@ -2203,3 +2633,4 @@ def get_department_awards(request, atp_user, user_dept):
             return HttpResponse(json.dumps(data), content_type="application/json")
         else:
             return HttpResponse('')
+

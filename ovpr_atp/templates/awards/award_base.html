@@ -113,6 +113,7 @@
                     <li><a class="sidenavLink white-text" href="#awardNegotiation">Award Negotiation</a></li>
                     <li><a class="sidenavLink white-text" href="#awardSetup">Award Setup</a></li>
                     <li><a class="sidenavLink white-text" href="#awardModification">Award Modification</a></li>
+                    <li><a class="sidenavLink white-text" href="#qualityAssurance">Quality Assurance</a></li>
                     <li><a class="sidenavLink white-text" href="#subawards">Subawards</a></li>
                     <li><a class="sidenavLink white-text" href="#awardManagement">Award Management</a></li>
                     <li><a class="sidenavLink white-text" href="#awardCloseout">Award Closeout</a></li>
@@ -220,7 +221,7 @@
         <div class="panel panel-default">
             <div id="awardSetup" class="panel-heading">
                 <h3 class="panel-title">
-                    <a class="accordion-toggle" data-toggle="collapse" data-target="#edit-award-setup">Award Setup <em>({{ award.award_setup_user.get_full_name }})</em> &nbsp; &nbsp; &nbsp; Award Modification <em>({{ award.award_modification_user.get_full_name|default:"N/A" }})</em></a>
+                    <a class="accordion-toggle" data-toggle="collapse" data-target="#edit-award-setup">Award Setup <em>({{ award.award_setup_user.get_full_name }})</em> &nbsp; &nbsp; &nbsp; &nbsp; Award Modification <em>({{ award.award_modification_user.get_full_name|default:"N/A" }})</em> &nbsp; &nbsp; &nbsp; &nbsp; Quality Assurance <em>({{ award.quality_assurance_user.get_full_name|default:"N/A" }})</em></a>
                 </h3>
             </div>
             <div id="edit-award-setup" class="panel-collapse collapse">

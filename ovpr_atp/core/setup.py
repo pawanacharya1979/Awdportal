@@ -18,6 +18,7 @@ def create_groups():
     Group.objects.get_or_create(name='Award Negotiation')
     Group.objects.get_or_create(name='Award Setup')
     Group.objects.get_or_create(name='Award Modification')
+    Group.objects.get_or_create(name='Quality Assurance')
     Group.objects.get_or_create(name='Award Management')
     Group.objects.get_or_create(name='Subaward Management')
     Group.objects.get_or_create(name='Award Closeout')
@@ -124,12 +125,21 @@ def create_dummy_proposals():
         email='fake@email.com',
     )
 
+    user_13 = User.objects.create_user(
+        username='james.smith',
+        password='password',
+        first_name='James',
+        last_name='Smith',
+        email='fake@email.com',
+    )
+
     group_0 = Group.objects.get(name='Proposal Intake')
     group_1 = Group.objects.get(name='Administrative')
     group_2a = Group.objects.get(name='Award Acceptance')
     group_2b = Group.objects.get(name='Award Negotiation')
     group_3a = Group.objects.get(name='Award Setup')
     group_3b = Group.objects.get(name='Award Modification')
+    group_3c = Group.objects.get(name='Quality Assurance')
     group_4 = Group.objects.get(name='Award Management')
     group_5 = Group.objects.get(name='Subaward Management')
     group_6 = Group.objects.get(name='Award Closeout')
@@ -146,6 +156,7 @@ def create_dummy_proposals():
     group_3a.user_set.add(user_8)
     group_4.user_set.add(user_9)
     group_5.user_set.add(user_10)
+    group_3c.user_set.add(user_13)
 
     Award.objects.create(
         status=2,

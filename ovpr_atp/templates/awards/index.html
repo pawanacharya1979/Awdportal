@@ -126,18 +126,14 @@
                                 {% endif %}
                             </td>
                             <td>
-                                {% if entry.0.send_to_modification %}
-                                    {{ entry.0.awardsetup.get_modification_waiting_reason }}
+                                {% if entry.0.assigned_to_qa and entry.0.quality_assurance_user %}
+                                Quality Assurance
                                 {% else %}
-                                    {{ entry.0.awardsetup.get_waiting_reason }}
+                                {{ entry.0.awardsetup.get_waiting_reason }}
                                 {% endif %}
                             </td>
                             <td>
-                                {% if entry.0.send_to_modification %}
-                                    {{ entry.0.awardsetup.get_modification_wait_for_updated | default:"" }}
-                                {% else %}
-                                    {{ entry.0.awardsetup.date_wait_for_updated | default:"" }}
-                                {% endif %}
+                                {{ entry.0.awardsetup.date_wait_for_updated | default:"" }}
                             </td>
                         </tr>
                     {% endfor %}

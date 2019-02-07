@@ -102,6 +102,16 @@ function setInputHandlers() {
         submitPOSTSectionForm($("#section-form"));
     });
 
+    $("#save-and-send-qa").click(function() {
+        $("#id_save_and_send_qa").val("True");
+        submitPOSTSectionForm($("#section-form"));
+    });
+
+    $("#return-assignment-submission").click(function() {
+        $("#id_return_assignment_submission").val("True");
+        submitPOSTSectionForm($("#section-form"));
+    });
+
     $("#submit-and-dual-send").click(function() {
         $("#id_move_to_multiple_steps").val("True");
         submitPOSTSectionForm($("#section-form"));

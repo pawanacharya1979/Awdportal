@@ -34,6 +34,8 @@ class AwardAdmin(reversion.VersionAdmin):
         except:
             old_object = None
         if old_object:
+            if obj.validation_rules != old_object.validation_rules:
+                obj.save()
             if obj.send_to_modification != old_object.send_to_modification:
                 if old_object.send_to_modification == True and obj.send_to_modification == False:
                     messages.warning(request, "send_to_modification flag 'Un Checked' for the Award #%d, "

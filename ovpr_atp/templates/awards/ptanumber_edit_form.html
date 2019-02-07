@@ -1,0 +1,384 @@
+{% extends "awards/award_base.html" %}
+{% load crispy_forms_tags %}
+
+{% block award_setup %}
+{% if object %}
+    <h4>Edit {{ object }}</h4>
+{% else %}
+    <h4>New PTA number</h4>
+{% endif %}
+
+<style>
+    body {font-family: Arial;}
+
+    /* Style the tab */
+    .tab {
+        overflow: hidden;
+        border: 1px solid #ccc;
+        background-color: #f1f1f1;
+    }
+
+    /* Style the buttons inside the tab */
+    .tab button {
+        background-color: inherit;
+        float: left;
+        border: none;
+        outline: none;
+        cursor: pointer;
+        padding: 14px 16px;
+        transition: 0.3s;
+        font-size: 17px;
+    }
+
+    /* Change background color of buttons on hover */
+    .tab button:hover {
+        background-color: #ddd;
+    }
+
+    /* Create an active/current tablink class */
+    .tab button.active {
+        background-color: #ccc;
+    }
+
+    /* Style the tab content */
+    .tabcontent {
+        display: none;
+        padding: 6px 12px;
+        border: 1px solid #ccc;
+        border-top: none;
+    }
+
+    #content {
+        margin: 0 auto; max-width: 800px; padding: 0 20px;
+    }
+    .object-list {
+        margin-top: 30px;
+    }
+    .object {
+        margin-bottom: 30px;
+    }
+    .object-controls {
+        margin-top: 10px;
+    }
+    </style>
+<link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
+<div class="panel-group">
+    <div class="panel panel-default">
+        <div class="panel-heading">
+            <h3 class="panel-title">
+                <a class="accordion-toggle" data-toggle="collapse" data-target="#ptanum" id="ptanumTab">PTANumber</a>
+            </h3>
+        </div>
+        <!--div class="tab">
+        <button class="tablinks" onclick="openTab(event, 'ptanum')" id="defaultOpen">PTANumber</button></div-->
+        <div id="ptanum" class="panel-collapse collapse">
+            <div class="panel-body">
+
+                <!--div id="ptanum" class="tabcontent"-->
+                {% crispy form %}
+                <br /><br />
+            </div>
+        </div>
+    </div>
+
+        <!--div class="tab">
+        <button class="tablinks" onclick="openTab(event, 'reports')">Reports</button></div-->
+        <div class="panel panel-default">
+            <div class="panel-heading">
+                <h3 class="panel-title">
+                    <a class="accordion-toggle" data-toggle="collapse" data-target="#tabcontent" id="reportTab">Reports</a>
+                </h3>
+            </div>
+            <!--div id="reports" class="tabcontent"-->
+            <div id="tabcontent" class="panel-collapse collapse">
+                <div class="panel-body">
+
+                    {% if report_objects %}
+                        <div>
+                            <div class='pull-right'>
+                                <a href="javascript:history.back()" class="btn btn-primary" data-fm-callback="reload">Cancel</a>
+                                <a href="{% url 'reports_create' pta_pk=object.id %}" class="fm-create btn btn-primary" data-fm-head="Creating Report" data-fm-callback="reload">Create new</a>
+                            </div>
+                        <div>
+                        <table class="table">
+                            <thead>
+                            <tr>
+                                <th></th>
+                                <th>Report Name</th>
+                                <th>Frequency</th>
+                                <th>No.of Copies</th>
+                                <th>Due within Days</th>
+                                <th>Due Date</th>
+                                <th>Action</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                        {% for report in report_objects %}
+                        <tr>
+                            <td>{% if report.get_checkbox_value %}
+                                <input type="checkbox" checked disabled>
+                                {% else %}
+                                <input type="checkbox" disabled>
+                                {% endif %}
+                            </td>
+                            <td>{{ report.report_name }}</td>
+                            <td>{{ report.get_frequencey }}</td>
+                            <td>{{ report.no_of_copies }}</td>
+                            <td>{{ report.due_within_days }}</td>
+                            <td>{{ report.due_dates }}</td>
+                            <td><a href="{% url 'reports_update' reports_pk=report.id %}" class="fm-update btn btn-default" data-fm-head="Updating Report" data-fm-callback="reload" data-fm-target="#object-{{ report.id }}">Update</a>
+                                <a href="{% url 'reports_delete' reports_pk=report.id %}" class="fm-delete btn btn-danger" data-fm-head="Delete this Report?" data-fm-callback="reload" data-fm-target="#object-{{ report.id }}">Delete</a>
+                                {% if report.get_show_dates %}
+                                    <button id="{{ report.id }}" class="sample">Due Dates</button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                            {% endfor %}
+                        </tbody>
+                        </table>
+                    </div>
+                    </div>
+                    {% else %}
+                        <div class="object-controls">
+                            <h5>No reports available for PTA#{{object.id}}</h5>
+                            <div class='pull-right'>
+                                <a href="javascript:history.back()" class="btn btn-primary" data-fm-callback="reload">Cancel</a>
+                                <a href="{% url 'reports_create' pta_pk=object.id %}" class="fm-create btn btn-primary" data-fm-head="Creating Report" data-fm-callback="reload">Create new</a>
+                            </div>
+                        </div>
+                        <br /><br />
+                    {% endif %}
+                    </div>
+                </div>
+            </div>
+                 <!--div class="tab">
+                    <button class="tablinks" onclick="openTab(event, 'terms')">Terms & Conditions</button>
+                </div-->
+            <div class="panel panel-default">
+                <div class="panel-heading">
+                    <h3 class="panel-title">
+                        <a class="accordion-toggle" data-toggle="collapse" data-target="#terms" id="termsTab">Terms & Conditions</a>
+                    </h3>
+                </div>
+
+                <!--div id="terms" class="tabcontent"-->
+                <div id="terms" class="panel-collapse collapse">
+                    <div class="panel-body">
+
+                        {% if tc_objects %}
+                        <div>
+                            <div class='pull-right'>
+                                <a href="javascript:history.back()" class="btn btn-primary" data-fm-callback="reload">Cancel</a>
+                                <a href="{% url 'tc_create' pta_pk=object.id %}" class="fm-create btn btn-primary" data-fm-head="Creating Terms and Conditions" data-fm-callback="reload">Create new</a>
+                            </div>
+                            <div>
+                            <table class="table">
+                                <thead>
+                                <tr>
+                                    <th></th>
+                                    <th>Category</th>
+                                    <th>Code</th>
+                                    <th>Action</th>
+                                </tr>
+                                </thead>
+                                <tbody>
+                            {% for report in tc_objects %}
+                            <tr>
+                                <td>{% if report.get_checkbox_value %}
+                                    <input type="checkbox" checked disabled>
+                                    {% else %}
+                                    <input type="checkbox" disabled>
+                                    {% endif %}
+                                </td>
+                                <td>{{ report.get_category_name }}</td>
+                                <td>{{ report.get_code_name }}</td>
+                                <td><a href="{% url 'tc_update' tc_pk=report.id %}" class="fm-update btn btn-default" data-fm-head="Updating Terms and Conditions" data-fm-callback="reload" data-fm-target="#object-{{ report.id }}">Update</a>
+                                    <a href="{% url 'tc_delete' tc_pk=report.id %}" class="fm-delete btn btn-danger" data-fm-head="Delete this Terms and Conditions?" data-fm-callback="reload" data-fm-target="#object-{{ report.id }}">Delete</a></td>
+                            </tr>
+                                {% endfor %}
+                            </tbody>
+                            </table>
+                        </div>
+                    </div>
+                            {% else %}
+                                <div class="object-controls">
+                                    <h5>No Terms and Conditions available for PTA#{{object.id}}</h5>
+                                    <div class='pull-right'>
+                                        <a href="javascript:history.back()" class="btn btn-primary" data-fm-callback="reload">Cancel</a>
+                                        <a href="{% url 'tc_create' pta_pk=object.id %}" class="fm-create btn btn-primary" data-fm-head="Creating Terms and Conditions" data-fm-callback="reload">Create new</a>
+                                    </div>
+                                </div>
+                                <br /><br />
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        <div id="dialog" title="Due dates"></div>
+{% include "awards/modal.html" %}
+<script>
+var local = [];
+var arr = [];
+
+
+ if(localStorage.getItem("pageSelectionFlag") === null){
+  localStorage.push('pageSelectionFlag','');
+ }
+
+ if(localStorage.getItem('pageSelectionFlag').length > 0){
+  local = localStorage.getItem("pageSelectionFlag").split(',');
+ }
+
+
+$("#ptanumTab").on("click",function(){
+    if($.inArray("ptanum",local)!='-1'){
+        if($("#ptanum").hasClass('collapse in')){
+            var arr = localStorage.getItem("pageSelectionFlag").split(',');
+            var index = arr.indexOf("ptanum");
+            if (index > -1) {
+              arr.splice(index, 1);
+              local.splice(index,1);
+              var str = arr.toString();
+              localStorage.setItem("pageSelectionFlag",str);
+
+            }
+        }
+    }
+    else{
+        local.push("ptanum");
+        localStorage.setItem("pageSelectionFlag",local);
+    }
+});
+
+$("#reportTab").on("click",function(){
+    if($.inArray("tabcontent",local)!='-1'){
+        if($("#tabcontent").hasClass('collapse in')){
+            var arr = localStorage.getItem("pageSelectionFlag").split(',');
+            var index = arr.indexOf("tabcontent");
+            if (index > -1) {
+              arr.splice(index, 1);
+              local.splice(index,1);
+              var str = arr.toString();
+              localStorage.setItem("pageSelectionFlag",str);
+
+            }
+        }
+    }
+    else{
+        local.push("tabcontent");
+        localStorage.setItem("pageSelectionFlag",local);
+    }
+});
+
+$("#termsTab").on("click",function(){
+    if($.inArray("terms",local)!='-1'){
+        if($("#terms").hasClass('collapse in')){
+            var arr = localStorage.getItem("pageSelectionFlag").split(',');
+            var index = arr.indexOf("terms");
+            if (index > -1) {
+              arr.splice(index, 1);
+              local.splice(index,1);
+              var str = arr.toString();
+              localStorage.setItem("pageSelectionFlag",str);
+
+            }
+        }
+    }
+    else{
+        local.push("terms");
+        localStorage.setItem("pageSelectionFlag",local);
+    }
+});
+
+$('#id_eas_status').change(function(){
+    if($(this).val()=='AR'){
+        $('#id_award_lov').val('N');
+        $('#id_tasks_lov').val('N');
+    }
+    else if ($(this).val()=='A'){
+        $('#id_award_lov').val('B');
+        $('#id_tasks_lov').val('B');
+    }
+    else{
+        $('#id_award_lov').val('');
+        $('#id_tasks_lov').val('');
+    }
+});
+
+$(function() {
+    $.fm({debug: true});
+});
+
+$('.sample').click(function() {
+    var reports_pk = $(this).attr('id');
+    var request_url = '/awards/show-due-dates/' + reports_pk + '/';
+    $.ajax({
+        url: request_url,
+        method: 'POST',
+        data: {
+        },
+        success: function (data) {
+            $("#dialog").html(data);
+            $("#dialog").dialog({'height':'auto', 'width': '1034px'});
+        }
+    });
+});
+
+$('body').on('change', '#id_category', function(){
+    var category_id = $("#id_category").val();
+    $('#id_code').val('');
+    var request_url = '/awards/get_codes_for_category/' + category_id + '/';
+    $.ajax({
+        url: request_url,
+        method: 'POST',
+        data: {
+        },
+        success: function (data) {
+            $("#id_code").html(data);
+        }
+    });
+});
+
+function openTab(evt, tabName) {
+    var i, tabcontent, tablinks;
+    tabcontent = document.getElementsByClassName("tabcontent");
+    for (i = 0; i < tabcontent.length; i++) {
+        tabcontent[i].style.display = "none";
+    }
+    tablinks = document.getElementsByClassName("tablinks");
+    for (i = 0; i < tablinks.length; i++) {
+        tablinks[i].className = tablinks[i].className.replace(" active", "");
+    }
+    document.getElementById(tabName).style.display = "block";
+    evt.currentTarget.className += " active";
+}
+//document.getElementById("defaultOpen").click();
+
+$(document).ready(function() {
+
+   enableDisableFields();
+   $('#id_ready_for_eas_setup').change(function() {
+      enableDisableFields();
+   });
+});
+
+function enableDisableFields () {
+
+	if ($('#id_ready_for_eas_setup').val() == 'M') {
+
+		//$('#id_award_number').prop('disabled', false);
+	    //$('#id_award_setup_complete').prop('disabled', false);
+        $('#id_award_number').removeAttr('readonly');
+        $('#id_award_setup_complete').removeAttr('readonly');
+
+	} else {
+		//$('#id_award_number').prop('disabled', true);
+        //$('#id_award_setup_complete').prop('disabled', true);
+        $('#id_award_number').attr('readonly', 'readonly');
+        $('#id_award_setup_complete').attr('readonly', 'readonly');
+	}
+}
+
+</script>
+  <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
+{% endblock %}
