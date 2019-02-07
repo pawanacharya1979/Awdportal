@@ -28,13 +28,15 @@
         </thead>
         <tbody>
             {% for proposal in proposals %}
+                {% if proposal.proposal_id %}
                 <tr>
                     <td><a href="{% url 'import_proposal' proposal_id=proposal.proposal_id award_pk=award.id %}">Add to award</a></td>
                     <td>{{ proposal.proposal_number }}</td>
                     <td>{{ proposal.project_title }}</td>
-                    <td>{{ proposal.last_name }}, {{ proposal.first_name }} {{ proposal.middle_name }}</td>
-                    <td>{{ proposal.submit_date }}</td>
+                    <td>{{ proposal.principal_investigator }}</td>
+                    <td>{{ proposal.submission_date }}</td>
                 </tr>
+                {% endif %}
             {% endfor %}
         </tbody>
     </table>

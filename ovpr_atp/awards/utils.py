@@ -5,7 +5,10 @@ from dateutil.relativedelta import relativedelta
 from django.conf import settings
 from django.db.models import DateField, DateTimeField, DecimalField, BigIntegerField, IntegerField, ForeignKey
 from urlparse import urljoin
-from .models import AwardManager, Proposal, KeyPersonnel, PerformanceSite, EASMapping, EASMappingException, AwardAcceptance
+from decimal import Decimal
+
+from .models import AwardManager, Proposal, KeyPersonnel, PerformanceSite, EASMapping, EASMappingException, AwardAcceptance,\
+    AwardOrganization, PrimeSponsor, FundingSource
 
 import csv
 import requests
@@ -34,6 +37,15 @@ def _make_cayuse_request(endpoint, payload={}):
 
     return response
 
+def get_cayuse_submissions_from_proposals_table(get_all_submissions=False):
+    """Used to populate the pick_proposal view
+    These proposals retrieved from the local database. as the local database filled with a automatic job
+    Defaults to the most recent six months of proposals, can be overriden to show all.
+    """
+    proposals = Proposal.objects.filter(award_id__isnull=True).order_by('-submission_date')[:20]
+    if get_all_submissions:
+        proposals = Proposal.objects.filter(award_id__isnull=True).order_by('-submission_date')
+    return proposals
 
 def get_cayuse_submissions(get_all_submissions=False):
     """Used to populate the pick_proposal view
@@ -43,7 +55,7 @@ def get_cayuse_submissions(get_all_submissions=False):
 
     options = {}
     if not get_all_submissions:
-        six_months_ago = date.today() - relativedelta(months=6)
+        six_months_ago = date.today() - relativedelta(months=2)
         options['since'] = six_months_ago
 
     response = _make_cayuse_request(
@@ -55,13 +67,97 @@ def get_cayuse_submissions(get_all_submissions=False):
     header = reader.next()
 
     proposals = []
+    missed_mappings = []
+    missed_pi = []
+    missed_whois = []
+    missed_dprt = []
+    missed_agency = []
+    entries = ['first_name', 'last_name', 'middle_name', 'submit_title', 'submit_date',
+               'division_code', 'submitterusername', 'department_code', 'result_code', 'duns_id']
 
     for row in reader:
         proposal = dict(zip(header, row))
-        proposal["proposal_number"] = '{0}-{1}'.format(proposal["submit_date"][2:4], proposal["proposal_id"])
-        proposals.append(proposal)
+        try:
+            prop = Proposal.objects.get(proposal_id=proposal['proposal_id'])
+        except:
+            prop = None
+        if not prop:
+            try:
+                cayuse_data = get_cayuse_summary(proposal['proposal_id'])
+                pi = get_cayuse_pi(
+                    cayuse_data['principal_investigator'],
+                    cayuse_data['proposal']['employee_id'])
+                proposal['principal_investigator_id'] = pi.id if pi.id else None
+            except:
+                missed = {}
+                missed['proposal_id'] = proposal['proposal_id']
+                missed['first_name'] = proposal['first_name']
+                missed['last_name'] = proposal['last_name']
+                missed_pi.append(missed)
+                missed_mappings.append(proposal['proposal_id'])
+            else:
+                proposal_dict = cayuse_data.get('proposal')
+                who_is_prime = proposal_dict['who_is_prime']
+                department = proposal_dict['department_name']
+                agency = proposal_dict['agency_name']
+                try:
+                    whois = PrimeSponsor.objects.get(name=who_is_prime.name)
+                    proposal['who_is_prime'] = whois
+                except:
+                    missed = {}
+                    missed['proposal_id'] = proposal['proposal_id']
+                    if who_is_prime:
+                        missed['who_is_prime'] = who_is_prime.name
+                    missed_whois.append(missed)
 
-    return proposals
+                    missed_mappings.append(proposal['proposal_id'])
+                try:
+                    department = AwardOrganization.objects.get(name=department.name)
+                    proposal['department_name'] = department
+                except:
+                    missed = {}
+                    missed['proposal_id'] = proposal['proposal_id']
+                    if department:
+                        missed['department_name'] = department.name
+                    missed_dprt.append(missed)
+
+                    missed_mappings.append(proposal['proposal_id'])
+                try:
+                    agency = FundingSource.objects.get(name=agency.name)
+                    proposal['agency_name'] = agency
+                except:
+                    missed = {}
+                    missed['proposal_id'] = proposal['proposal_id']
+                    if agency:
+                        missed['agency_name'] = agency.name
+                    missed_agency.append(missed)
+
+                    missed_mappings.append(proposal['proposal_id'])
+
+                if not proposal['total_indirect_costs']:
+                    del proposal['total_indirect_costs']
+                else:
+                    proposal['total_indirect_costs'] = Decimal(proposal['total_indirect_costs'])
+                if not proposal['total_direct_costs']:
+                    del proposal['total_direct_costs']
+                else:
+                    proposal['total_direct_costs'] = Decimal(proposal['total_direct_costs'])
+                proposal['proposal_number'] = '{0}-{1}'.format(proposal["submit_date"][2:4], proposal['proposal_id'])
+                if proposal['submit_date'][0:10]:
+                    proposal['submission_date'] = datetime.strptime(proposal['submit_date'][0:10], '%Y-%m-%d')
+                try:
+                    proposal['project_title'] = proposal['project_title'][:255]
+                except:
+                    pass
+
+                for key in entries:
+                    if key in proposal:
+                        del proposal[key]
+
+                if proposal.get("submission_date"):
+                    proposals.append(proposal)
+
+    return proposals, missed_mappings, missed_pi, missed_whois, missed_dprt, missed_agency
 
 
 def cast_field_value(field, value):

@@ -651,6 +651,7 @@ class Award(models.Model):
     award_dual_negotiation = models.BooleanField(default=False)
     award_dual_setup = models.BooleanField(default=False)
     award_dual_modification = models.BooleanField(default=False)
+    award_text = models.CharField(max_length=50, blank=True, null=True)
 
     # If an award has a proposal, use that to determine its name. Otherwise,
     # use its internal ID
@@ -2589,7 +2590,7 @@ class AwardAcceptance(AwardModificationMixin, AwardSection):
                             'fi': 5,
                             'ni': 9
                             }
-    HIDDEN_FIELDS = AwardSection.HIDDEN_FIELDS + ['current_modification']
+    HIDDEN_FIELDS = AwardSection.HIDDEN_FIELDS + ['current_modification', 'award_text']
 
     HIDDEN_SEARCH_FIELDS = AwardSection.HIDDEN_SEARCH_FIELDS + [
         'fcoi_cleared_date',
@@ -2916,6 +2917,7 @@ class AwardAcceptance(AwardModificationMixin, AwardSection):
         verbose_name='GMO/CO email')
     pta_modification = models.NullBooleanField(verbose_name='Do you want to send this to the post-award team for modification?')
     acceptance_completion_date = models.DateTimeField(blank=True, null=True, verbose_name='Completion Date')
+    award_text = models.CharField(max_length=50, blank=True, null=True)
 
     def __unicode__(self):
         return u'Award Intake %s' % (self.id)
@@ -3072,7 +3074,7 @@ class AwardNegotiation(AwardModificationMixin, AssignableAwardSection):
         ('UD', 'Unrealized')
     )
 
-    HIDDEN_FIELDS = AwardSection.HIDDEN_FIELDS + ['current_modification', 'date_received']
+    HIDDEN_FIELDS = AwardSection.HIDDEN_FIELDS + ['current_modification', 'date_received', 'award_text']
 
     HIDDEN_SEARCH_FIELDS = AwardSection.HIDDEN_SEARCH_FIELDS + [
         'subcontracting_plan',
@@ -3154,6 +3156,7 @@ class AwardNegotiation(AwardModificationMixin, AssignableAwardSection):
     publication_restriction = models.NullBooleanField(
         verbose_name='Publication Restriction?')
     negotiation_completion_date = models.DateTimeField(blank=True, null=True, verbose_name='Completion Date')
+    award_text = models.CharField(max_length=50, blank=True, null=True)
 
     def __unicode__(self):
         return u'Award Negotiation %s' % (self.id)
@@ -3521,7 +3524,15 @@ class AwardSetup(AssignableAwardSection):
             self.save()
 
     def get_waiting_reason(self):
-            return self.WAIT_FOR.get(self.wait_for_reson) if self.wait_for_reson else ''
+        return self.WAIT_FOR.get(self.wait_for_reson) if self.wait_for_reson else ''
+
+    def get_modification_waiting_reason(self):
+        modification = AwardModification.objects.filter(award_id=self.award_id).order_by('-date_wait_for_updated')
+        return self.WAIT_FOR.get(modification[0].wait_for_reson) if modification else ''
+
+    def get_modification_wait_for_updated(self):
+        modification = AwardModification.objects.filter(award_id=self.award_id).order_by('-date_wait_for_updated')
+        return modification[0].date_wait_for_updated if modification else ''
 
 class AwardModification(AssignableAwardSection):
     """Model for the AwardModification data"""

@@ -4,6 +4,7 @@
 # See Django documentation at https://docs.djangoproject.com/en/1.6/topics/http/views/
 # and https://docs.djangoproject.com/en/1.6/topics/class-based-views/
 
+import re
 from django.shortcuts import render, redirect, get_object_or_404, resolve_url
 from django.http import Http404, HttpResponseRedirect, HttpResponse
 from django.core import management
@@ -38,7 +39,8 @@ from .models import ProposalIntake, Proposal, KeyPersonnel, PerformanceSite, Awa
     AwardSetup, PTANumber, Subaward, AwardManagement, PriorApproval, ReportSubmission, AwardCloseout, FinalReport, \
     EASMapping, EASMappingException, AwardModification, NegotiationStatus, ATPAuditTrail
 from .utils import get_cayuse_submissions, get_cayuse_summary, get_cayuse_pi, get_key_personnel, get_performance_sites, \
-    cast_lotus_value, get_proposal_statistics_report
+    cast_lotus_value, get_proposal_statistics_report, get_cayuse_submissions_from_proposals_table
+
 from core.utils import make_eas_request
 
 
@@ -255,9 +257,18 @@ def get_awards_ajax(request):
                           if all([award.award_dual_negotiation, award.award_dual_setup, award.status == 2]) or
                              all([award.award_dual_modification, award.status == 2])
                           else award.get_status_display())
-        award_data.append(Award.WAIT_FOR.get(award.awardsetup.wait_for_reson)
-                          if (award.status == 3)
-                          else None)
+        if award.status == 3:
+            wait_for = ATPAuditTrail.objects.filter(award=award.id, date_completed=None).exclude(
+                Q(Q(workflow_step='AwardAcceptance') | Q(workflow_step='AwardNegotiation') |
+                  Q(workflow_step='AwardSetup') | Q(workflow_step='Subaward') |
+                  Q(workflow_step='AwardManagement') | Q(workflow_step='AwardCloseout') |
+                  Q(workflow_step='AwardModification')
+                  )).order_by('-id')
+            award_data.append(str(wait_for[0].workflow_step)
+                              if (wait_for)
+                              else None)
+        else:
+            award_data.append(None)
         response['data'].append(award_data)
 
     json_data = json.dumps(response)
@@ -659,13 +670,56 @@ def pick_proposal(request, award_pk, lotus=False):
         template = 'awards/lotus_proposal_list.html'
     else:
         if 'all-proposals' in request.GET:
-            data['proposals'] = get_cayuse_submissions(True)
+            #data['proposals'] = get_cayuse_submissions(True)
+            data['proposals'] = get_cayuse_submissions_from_proposals_table(True)
             data['all_proposals'] = True
         else:
-            data['proposals'] = get_cayuse_submissions()
+            #data['proposals'] = get_cayuse_submissions()
+            data['proposals'] = get_cayuse_submissions_from_proposals_table()
         template = 'awards/proposal_list.html'
 
     return render(request, template, data)
+
+@login_required
+def get_cayuse_proposals(request):
+    proposals, missed_mappings, missed_pi, missed_whois, missed_dprt, missed_agency = get_cayuse_submissions()
+    missed_mappings = set(missed_mappings)
+    successful_imports = []
+
+    for proposal in proposals:
+        if not proposal['proposal_id'] in list(missed_mappings):
+            prop = Proposal(**proposal)
+            prop.save()
+            successful_imports.append(proposal['proposal_id'])
+
+
+    return render(request, 'awards/import_cayuse_proposals.html', {'missed_mappings': missed_mappings,
+                                                                   'proposal_count': len(successful_imports),
+                                                                   'missed_pi': missed_pi,
+                                                                   'missed_whois': missed_whois,
+                                                                   'missed_dprt': missed_dprt,
+                                                                   'missed_agency': missed_agency,
+                                                                   'successful_imports': successful_imports})
+
+@login_required
+def get_all_cayuse_proposals(request):
+    proposals, missed_mappings, missed_pi, missed_whois, missed_dprt, missed_agency = get_cayuse_submissions(True)
+    missed_mappings = set(missed_mappings)
+    successful_imports = []
+
+    for proposal in proposals:
+        if not proposal['proposal_id'] in list(missed_mappings):
+            prop = Proposal(**proposal)
+            prop.save()
+            successful_imports.append(proposal['proposal_id'])
+
+    return render(request, 'awards/import_cayuse_proposals.html', {'missed_mappings': missed_mappings,
+                                                                   'proposal_count': len(successful_imports),
+                                                                   'missed_pi': missed_pi,
+                                                                   'missed_whois': missed_whois,
+                                                                   'missed_dprt': missed_dprt,
+                                                                   'missed_agency': missed_agency,
+                                                                   'successful_imports':successful_imports})
 
 
 @login_required
@@ -834,9 +888,15 @@ def create_modification(request, award_pk):
         return render(request,
                       'awards/confirm_modification.html', {'award': award,
                                                            'editable_sections': award.get_editable_sections()})
+    elif request.method == 'POST' and request.POST.get('_method'):
+        return render(request,
+                      'awards/rename_modification_award.html', {'award': award,
+                                                                'editable_sections': award.get_editable_sections(),
+                                                                })
     else:
         with transaction.atomic():
             # Duplicate the AwardAcceptance and AwardNegotiation objects
+            award_type = request.POST.get('award_type')
             for current_section in [award.get_current_award_acceptance(), award.get_current_award_negotiation()]:
                 new_section = current_section
 
@@ -848,9 +908,26 @@ def create_modification(request, award_pk):
 
                 current_section.save()
 
+                if award_type == 'Modification':
+                    modification_list = []
+                    award_acceptance = AwardAcceptance.objects.filter(
+                        award_id=award.id).exclude(award_text__in=['Original Award',
+                                                                   'Administrative Establishment',
+                                                                   'Administrative Funding'])
+                    for accept in award_acceptance:
+                        if accept.award_text and '#' in accept.award_text:
+                            modification_list.append(int(re.search(r'\d+', accept.award_text).group()))
+                    if modification_list:
+                        award_type = 'Modification #%d' % (max(modification_list) + 1)
+                    elif len(award_acceptance) > 1:
+                        award_type = 'Modification #%d' % (len(award_acceptance))
+                    else:
+                        award_type = 'Modification #1'
+
                 new_section.pk = None
                 new_section.date_assigned = None
                 new_section.current_modification = True
+                new_section.award_text = award_type
                 if hasattr(new_section, 'acceptance_completion_date'):
                     new_section.acceptance_completion_date = None
                 if hasattr(new_section, 'negotiation_completion_date'):
@@ -947,6 +1024,24 @@ class CreateAwardView(CreateView):
         return redirect
 
 
+def get_award_type_value(request, award_id):
+    return render(request, 'awards/rename_original_award.html', {'award_pk': award_id})
+
+def redirect_to_award_details(request, award_pk):
+    """
+    This method is going to move award to next stage and then redirect to the award details page
+    :param request: request object
+    :param award_pk: award id
+    :return: HttpResponse will redirect the award details page
+    """
+    award = Award.objects.get(id=award_pk)
+    award.move_to_next_step()
+    award_text = request.POST.get('award_text')
+    award.award_text = award_text
+    award.save()
+    return HttpResponseRedirect(award.get_absolute_url())
+
+
 class CreateAwardStandaloneView(CreateView):
     """Create an award from the homepage"""
 
@@ -954,10 +1049,11 @@ class CreateAwardStandaloneView(CreateView):
     form_class = AwardForm
 
     def form_valid(self, form):
-        redirect = super(CreateAwardStandaloneView, self).form_valid(form)
-        self.object.move_to_next_step()
-        return redirect
-
+        #redirect = super(CreateAwardStandaloneView, self).form_valid(form)
+        super(CreateAwardStandaloneView, self).form_valid(form)
+        #self.object.move_to_next_step()
+        #return redirect
+        return get_award_type_value(self.request, self.object.id)
 
 
 class EditAwardView(UpdateView):

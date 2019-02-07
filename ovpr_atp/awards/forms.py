@@ -622,7 +622,8 @@ class AwardAcceptanceForm(AwardSectionForm):
 
     class Meta(AwardSectionForm.Meta):
         model = AwardAcceptance
-        exclude = AwardSectionForm.Meta.exclude + ['current_modification', 'creation_date', 'acceptance_completion_date']
+        exclude = AwardSectionForm.Meta.exclude + ['current_modification', 'creation_date',
+                                                   'acceptance_completion_date', 'award_text']
 
 
 class AwardNegotiationForm(AwardSectionForm):
@@ -635,7 +636,8 @@ class AwardNegotiationForm(AwardSectionForm):
     class Meta(AwardSectionForm.Meta):
         model = AwardNegotiation
         exclude = AwardSectionForm.Meta.exclude + ['current_modification', 'date_assigned',
-                                                   'date_received', 'negotiation_completion_date']
+                                                   'date_received', 'negotiation_completion_date',
+                                                   'award_text']
 
 
 class AwardSetupForm(AwardSectionForm):

@@ -194,7 +194,7 @@
             <div id="edit-award-intake" class="panel-collapse collapse">
                 <div class="panel-body">
                     {% block award_acceptance %}
-                        {% include 'awards/_section_modification_detail.html' with previous_modifications=award.get_previous_award_acceptances instance=award.get_current_award_acceptance type="acc" %}
+                        {% include 'awards/_section_modification_detail.html' with previous_modifications=award.get_previous_award_acceptances instance=award.get_current_award_acceptance award=award type="acc" %}
                     {% endblock %}
                 </div>
             </div>

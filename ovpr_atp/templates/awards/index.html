@@ -126,10 +126,18 @@
                                 {% endif %}
                             </td>
                             <td>
-                                {{ entry.0.awardsetup.get_waiting_reason }}
+                                {% if entry.0.send_to_modification %}
+                                    {{ entry.0.awardsetup.get_modification_waiting_reason }}
+                                {% else %}
+                                    {{ entry.0.awardsetup.get_waiting_reason }}
+                                {% endif %}
                             </td>
                             <td>
-                                {{ entry.0.awardsetup.date_wait_for_updated | default:"" }}
+                                {% if entry.0.send_to_modification %}
+                                    {{ entry.0.awardsetup.get_modification_wait_for_updated | default:"" }}
+                                {% else %}
+                                    {{ entry.0.awardsetup.date_wait_for_updated | default:"" }}
+                                {% endif %}
                             </td>
                         </tr>
                     {% endfor %}

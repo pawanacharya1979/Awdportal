@@ -2,5 +2,74 @@
 
 {% block content %}
 <h2>Cayuse Import Complete</h2>
+<br/>
+{% if proposal_count %}
+<h3>{{ proposal_count }} &nbsp; Proposals Successfully imported into ATP</h3>
+    <table>
+        <tr><th>Proposal Number</th></tr>
+        {% for success in successful_imports %}
+            <tr>
+                <td>{{ success }}</td>
+            </tr>
+        {% endfor %}
+    </table>
+{% else %}
+<h3> No Proposal imported into ATP</h3>
+{% endif %}
+<br/>
+{% if missed_pi %}
+    <h4>Unable to import below proposals because of No PI Mappings in ATP</h4>
+    <table>
+        <tr><th>Proposal Number</th><th>First Name</th><th>Last Name</th></tr>
+        {% for missing in missed_pi %}
+            <tr>
+                <td>{{ missing.proposal_id }}</td>
+                <td>{{ missing.first_name }}</td>
+                <td>{{ missing.last_name }}</td>
+            </tr>
+        {% endfor %}
+    </table>
+{% endif %}
 
+{% if missed_whois %}
+    <br/><hr>
+    <h4>Unable to import below proposals because of No Who is Prime Mappings in ATP</h4>
+    <table>
+        <tr><th>Proposal Number</th><th>Who is Prime</th></tr>
+        {% for missing in missed_whois %}
+            <tr>
+                <td>{{ missing.proposal_id }}</td>
+                <td>{{ missing.who_is_prime }}</td>
+            </tr>
+        {% endfor %}
+    </table>
+{% endif %}
+
+{% if missed_dprt %}
+    <br/><hr>
+    <h4>Unable to import below proposals because of No Department  Mappings in ATP</h4>
+    <table>
+        <tr><th>Proposal Number</th><th>Department Name</th></tr>
+        {% for missing in missed_dprt %}
+            <tr>
+                <td>{{ missing.proposal_id }}</td>
+                <td>{{ missing.department_name }}</td>
+            </tr>
+        {% endfor %}
+    </table>
+{% endif %}
+
+{% if missed_agency %}
+    <br/><hr>
+    <h4>Unable to import below proposals because of No Agency Mappings in ATP</h4>
+    <table>
+        <tr><th>Proposal Number</th><th>Agency Name</th></tr>
+        {% for missing in missed_agency %}
+            <tr>
+                <td>{{ missing.proposal_id }}</td>
+                <td>{{ missing.agency_name }}</td>
+            </tr>
+        {% endfor %}
+    </table>
+{% endif %}
 {% endblock %}

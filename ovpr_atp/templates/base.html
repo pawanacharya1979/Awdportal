@@ -99,6 +99,13 @@
                                         <li class="pull-right divider-vertical"></li>
                                         {% if user.is_staff %}
                                             <li class="dropdown pull-right">
+                                                <a href="#" class="dropdown-toggle white-text" data-toggle="dropdown">Imports<span class="caret"></span></a>
+                                                <ul class="dropdown-menu" role="menu">
+                                                    <li><a href="{% url 'get_cayuse_proposals' %}" class="white-text">Import Cayuse Proposals</a></li>
+                                                    <li><a href="{% url 'get_all_cayuse_proposals' %}" class="white-text">Import All Cayuse Proposals</a></li>
+                                                </ul>
+                                            </li>
+                                            <li class="dropdown pull-right">
                                                 <a href="#" class="dropdown-toggle white-text" data-toggle="dropdown">Reports<span class="caret"></span></a>
                                                 <ul class="dropdown-menu" role="menu">
                                                     <li><a href="{% url 'admin:report_builder_report_changelist' %}">ATP Reports</a></li>
