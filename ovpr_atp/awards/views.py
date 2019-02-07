@@ -50,7 +50,7 @@ from .models import (
 from .utils import get_cayuse_submissions, get_cayuse_summary, get_cayuse_pi, get_key_personnel, get_performance_sites, \
     cast_lotus_value, get_proposal_statistics_report
 from core.utils import make_eas_request
-from fm.views import AjaxCreateView, AjaxUpdateView, AjaxDeleteView
+from fm.views import AjaxCreateView, AjaxUpdateView, AjaxDeleteView, AjaxRedoView
 
 
 @login_required
